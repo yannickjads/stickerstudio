@@ -19,6 +19,7 @@ import { renderCroppedPng, ensureDecodableUri, STICKER_SIZE } from '../editor/re
 import { renderCroppedGif, maybeAnimatedSource } from '../editor/renderAnimated';
 import { renderVideoSticker, QUALITY, MAX_CLIP_MS, type QualityKey } from '../editor/renderVideo';
 import { videoInfo, extractFrames } from '../../modules/video-frames';
+import { cutoutSubject, cutoutSupported } from '../../modules/subject-cutout';
 import Cropper from '../SquareCropper';
 import { Slider } from '../editor/controls';
 
@@ -42,6 +43,9 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   const [clipMs, setClipMs] = useState(MAX_CLIP_MS); // clip length
   const [quality, setQuality] = useState<QualityKey>('balanced');
   const [optimize, setOptimize] = useState(true);
+  const [cutout, setCutout] = useState(false);
+  const [canCutout, setCanCutout] = useState(false);
+  useEffect(() => { cutoutSupported().then(setCanCutout); }, []);
   const launched = useRef(false);
 
   // Save target: a queue of free slots starting at startSlot (wrapping around to
@@ -107,6 +111,22 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   const posterTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (posterTimer.current) clearTimeout(posterTimer.current); }, []);
 
+  // Preview the cut-out in the cropper, so you frame what you'll actually get.
+  const previewSeq = useRef(0);
+  useEffect(() => {
+    if (!items) return;
+    const it = items[index];
+    if (!cutout || it.video) return;
+    const seq = ++previewSeq.current;
+    let alive = true;
+    (async () => {
+      const cut = await cutoutSubject(it.uri);
+      if (!alive || seq !== previewSeq.current || !cut) return;
+      setItems((prev) => prev && prev.map((x) => (x.id === it.id ? { ...x, poster: cut } : x)));
+    })();
+    return () => { alive = false; };
+  }, [cutout, index, items?.length]);
+
   const schedulePoster = (it: Item, atMs: number) => {
     if (!it.video) return;
     if (posterTimer.current) clearTimeout(posterTimer.current);
@@ -122,18 +142,33 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
     }, 180);
   };
 
-  const clipOptions = () => {
-    Alert.alert('Clip quality', undefined, [
-      ...(Object.keys(QUALITY) as QualityKey[]).map((k) => ({
-        text: quality === k ? `✓  ${QUALITY[k].label}` : QUALITY[k].label,
+  const tick = (on: boolean, label: string) => (on ? `✓  ${label}` : label);
+
+  const stickerOptions = (isVideo: boolean) => {
+    Alert.alert(isVideo ? 'Clip options' : 'Sticker options', undefined, [
+      ...(canCutout ? [{
+        text: tick(cutout, 'Cut out subject'),
+        onPress: () => setCutout((v) => !v),
+      }] : []),
+      ...(isVideo ? (Object.keys(QUALITY) as QualityKey[]).map((k) => ({
+        text: tick(quality === k, QUALITY[k].label),
         onPress: () => setQuality(k),
-      })),
-      {
-        text: optimize ? '✓  Smaller file size' : 'Smaller file size',
+      })) : []),
+      ...(isVideo ? [{
+        text: tick(optimize, 'Smaller file size'),
         onPress: () => setOptimize((v) => !v),
-      },
+      }] : []),
       { text: 'Done', style: 'cancel' as const },
     ]);
+  };
+
+  // One muted line summarising whatever is switched on.
+  const optionsSummary = (isVideo: boolean) => {
+    const bits: string[] = [];
+    if (isVideo) bits.push(QUALITY[quality].label);
+    if (isVideo && optimize) bits.push('smaller file');
+    if (cutout) bits.push('cut out');
+    return bits.length ? bits.join(' · ') : 'Options';
   };
 
   // Integer square crop rect, fully inside the image.
@@ -171,10 +206,20 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
     // Normalize once at import (iPhone HEIC etc. -> a format Skia can decode).
     // A clip keeps its poster frame as the stored source: the video itself is not
     // ours to copy into app storage.
-    const srcUri = it.video ? (it.poster ?? it.uri) : await ensureDecodableUri(it.uri);
+    let srcUri = it.video ? (it.poster ?? it.uri) : await ensureDecodableUri(it.uri);
+    // Lifting the subject happens before cropping, so the crop rect — measured
+    // against the original — still lines up.
+    let cutUri: string | null = null;
+    if (cutout && !it.video) {
+      setProgress('cutting out subject');
+      cutUri = await cutoutSubject(srcUri);
+      setProgress(null);
+      if (cutUri) srcUri = cutUri;
+    }
     // Keep the source + an editable document behind the sticker (future editing).
     const asset = await createAsset(srcUri, it.w, it.h);
-    if (srcUri !== it.uri) await deleteFile(srcUri); // transcode temp no longer needed
+    if (srcUri !== it.uri) await deleteFile(srcUri); // transcode/cutout temp no longer needed
+    if (cutUri && cutUri !== srcUri) await deleteFile(cutUri);
     const now = Date.now();
     const doc: EditorDocument = {
       id: newId(),
@@ -320,13 +365,15 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
 
             {/* The technical choices live one tap away, in a native sheet — the
                 same place every other choice in this app lives. */}
-            <Pressable onPress={clipOptions} style={st.optionsRow}>
-              <Text style={st.optionsTxt}>
-                {QUALITY[quality].label}{optimize ? ' · smaller file' : ''}
-              </Text>
-              <Ionicons name="chevron-forward" size={15} color={C.muted} />
-            </Pressable>
           </View>
+        ) : null}
+
+        {/* Same single line for stills and clips — one place for every choice. */}
+        {canCutout || cur.video ? (
+          <Pressable onPress={() => stickerOptions(!!cur.video)} style={st.optionsRow}>
+            <Text style={st.optionsTxt}>{optionsSummary(!!cur.video)}</Text>
+            <Ionicons name="chevron-forward" size={15} color={C.muted} />
+          </Pressable>
         ) : null}
 
         {willSplit ? (
@@ -359,7 +406,7 @@ const st = StyleSheet.create({
   lengthTxtOn: { color: C.ink },
   optionsRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 4,
+    paddingHorizontal: EDGE, marginTop: 14, paddingVertical: 6,
   },
   optionsTxt: { color: C.muted, fontSize: 14, fontWeight: '500' },
   splitNote: {
