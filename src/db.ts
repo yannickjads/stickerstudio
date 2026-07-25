@@ -4,7 +4,7 @@ import type { Pack, Sticker, Asset, EditorDocument } from './types';
 import { PACK_MAX } from './types';
 import { newId, saveRender, saveAsset, deleteRender, deleteFile, toAbs, toRel } from './storage';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 // Rows store paths relative to the studio dir (see storage.ts) — resolve on read.
 const mapSticker = (s: Sticker): Sticker => ({ ...s, uri: toAbs(s.uri) });
@@ -80,6 +80,11 @@ function db(): Promise<SQLite.SQLiteDatabase> {
             WHERE instr(localUri, 'studio/') > 0;
         `);
       }
+      if (version < 5) {
+        // v5: an emoji per sticker. Telegram requires at least one; WhatsApp uses
+        // them to make stickers searchable.
+        try { await d.execAsync(`ALTER TABLE stickers ADD COLUMN emoji TEXT NOT NULL DEFAULT ''`); } catch {}
+      }
       await d.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
       return d;
     })();
@@ -123,6 +128,13 @@ export async function createPack(name: string, author = ''): Promise<Pack> {
     [pack.id, pack.name, pack.author, null, pack.sortIndex, now, now],
   );
   return pack;
+}
+
+// One emoji per sticker: Telegram requires at least one, WhatsApp searches by it.
+export async function setStickerEmoji(stickerId: string, emoji: string): Promise<void> {
+  const d = await db();
+  await d.runAsync(`UPDATE stickers SET emoji=?, updatedAt=? WHERE id=?`,
+    [Array.from(emoji.trim())[0] ?? '', Date.now(), stickerId]);
 }
 
 // The pack's tray/cover icon. Set once, reused by the pack grid, WhatsApp's tray,
@@ -255,7 +267,7 @@ export async function addSticker(
   if (free.length === 0) throw new Error('This pack is full.');
   const useSlot = slot != null && free.includes(slot) ? slot : free[0];
   const uri = await saveRender(permanentUri, id); // copy temp render -> permanent
-  const sticker: Sticker = { id, packId, uri, documentId, width, height, sortIndex: useSlot, createdAt: now, updatedAt: now };
+  const sticker: Sticker = { id, packId, uri, documentId, emoji: '', width, height, sortIndex: useSlot, createdAt: now, updatedAt: now };
   try {
     await d.runAsync(
       `INSERT INTO stickers (id,packId,uri,documentId,width,height,sortIndex,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)`,

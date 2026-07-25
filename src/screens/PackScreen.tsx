@@ -13,12 +13,14 @@ import type { Pack, Sticker } from '../types';
 import { PACK_MAX } from '../types';
 import {
   listStickers, deleteSticker, getPack, ensurePackSlots, updatePack, deletePack,
-  setPackCover, getPackCoverSticker,
+  setPackCover, getPackCoverSticker, setStickerEmoji,
 } from '../db';
 import { nativePrompt } from '../../modules/native-prompt';
 import { buildWhatsAppPayload, isAnimatedSticker, WA_MIN_STICKERS } from '../editor/whatsappExport';
 import { exportPacksToZip } from '../backup';
 import { exportWastickers } from '../wastickers';
+import { buildTelegramPayload } from '../editor/telegramExport';
+import { isTelegramInstalled, sendStickerSetToTelegram } from '../../modules/telegram-stickers';
 import { isWhatsAppInstalled, sendStickerPackToWhatsApp } from '../../modules/whatsapp-stickers';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -66,6 +68,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
         text: 'Use as pack icon',
         onPress: async () => { await setPackCover(packId, s.id); load(); },
       }]),
+      { text: s.emoji ? `Emoji  ${s.emoji}` : 'Set emoji', onPress: () => setEmoji(s) },
       { text: 'Share', onPress: () => shareOne(s.uri) },
       {
         text: 'Delete', style: 'destructive',
@@ -76,6 +79,41 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
       },
       { text: 'Cancel', style: 'cancel' },
     ]);
+  };
+
+  const setEmoji = async (s: Sticker) => {
+    const r = await nativePrompt({
+      title: 'Sticker emoji',
+      message: 'Used by Telegram and to search stickers in WhatsApp.',
+      fields: [{ placeholder: '😀', value: s.emoji }],
+    });
+    if (!r) return;
+    await setStickerEmoji(s.id, r[0] ?? '');
+    load();
+  };
+
+  const sendToTelegram = async () => {
+    if (!pack || waBusy || !stickers.length) return;
+    if (!(await isTelegramInstalled())) {
+      Alert.alert('Telegram not found', 'Install Telegram to add sticker sets.');
+      return;
+    }
+    setWaBusy(true);
+    try {
+      const cover = await getPackCoverSticker(packId);
+      const { json, animatedAsStill } = await buildTelegramPayload(
+        pack, stickers, (done, total) => setWaProgress(`${done}/${total}`), cover?.uri,
+      );
+      setWaProgress(null);
+      const ok = await sendStickerSetToTelegram(json);
+      if (!ok) Alert.alert('Could not open Telegram');
+      else if (animatedAsStill) {
+        Alert.alert('Sent to Telegram',
+          `${animatedAsStill} animated sticker${animatedAsStill === 1 ? ' was' : 's were'} sent as a still image — Telegram only animates its own TGS/WebM formats.`);
+      }
+    } catch (e: any) {
+      Alert.alert('Telegram export failed', String(e?.message || e));
+    } finally { setWaBusy(false); setWaProgress(null); }
   };
 
   const addAt = (slot: number) => nav.push({ name: 'crop', packId, packName: name, startSlot: slot });
@@ -164,6 +202,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     Alert.alert(name, pack?.author ? `by ${pack.author}` : undefined, [
       { text: 'Edit name & author', onPress: editPack },
       { text: 'Back up pack (.zip)', onPress: exportPack },
+      { text: 'Add to Telegram', onPress: sendToTelegram },
       { text: 'Export as .wastickers', onPress: exportWa },
       { text: 'Save all to Photos', onPress: saveAllToPhotos },
       {

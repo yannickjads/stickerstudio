@@ -19,6 +19,7 @@ export type Sticker = {
   packId: string;
   uri: string;          // permanent flattened PNG in app storage (for display/thumbnail/export)
   documentId: string | null; // the editable document behind this sticker (P2+)
+  emoji: string;        // shown/searched in Telegram + WhatsApp ('' = none set)
   width: number;
   height: number;
   sortIndex: number;

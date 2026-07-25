@@ -114,14 +114,16 @@ export async function buildWhatsAppPayload(
   onProgress?: (done: number, total: number) => void,
   trayUri?: string, // the pack's cover sticker; falls back to the first one
 ): Promise<string> {
-  const images: string[] = [];
+  const images: { data: string; emojis: string[] }[] = [];
   for (let i = 0; i < stickers.length; i++) {
     const s = stickers[i];
-    images.push(!animated
+    const data = !animated
       ? await staticWebpBase64(s.uri)
       : isAnimatedSticker(s)
         ? await animatedWebpBase64(s.uri)
-        : await stillAsAnimatedWebpBase64(s.uri));
+        : await stillAsAnimatedWebpBase64(s.uri);
+    // WhatsApp uses these to make a sticker findable in its search field.
+    images.push({ data, emojis: s.emoji ? [s.emoji] : [] });
     onProgress?.(i + 1, stickers.length);
   }
   const payload = {
@@ -132,7 +134,7 @@ export async function buildWhatsAppPayload(
     animated_sticker_pack: animated,
     ios_app_store_link: '',
     android_play_store_link: '',
-    stickers: images.map((image_data) => ({ image_data, emojis: [] as string[] })),
+    stickers: images.map((s) => ({ image_data: s.data, emojis: s.emojis })),
   };
   return JSON.stringify(payload);
 }
