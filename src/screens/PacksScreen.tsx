@@ -117,7 +117,7 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
     const b = (appConfig.expo.ios as { buildNumber?: string }).buildNumber ?? 'dev';
     Alert.alert('Sticker Studio', `Version ${v} (${b})`, [
       { text: 'Back up all packs (.zip)', onPress: backUpAll },
-      { text: 'Import pack or backup…', onPress: restore },
+      { text: 'Import .wastickers or backup…', onPress: restore },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };

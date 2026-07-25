@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Dimensions, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSharedValue } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
@@ -16,9 +16,16 @@ import {
 import { deleteRender, deleteFile, newId } from '../storage';
 import { renderCroppedPng, ensureDecodableUri, STICKER_SIZE } from '../editor/renderCrop';
 import { renderCroppedGif, maybeAnimatedSource } from '../editor/renderAnimated';
+import { renderVideoSticker, QUALITY, MAX_CLIP_MS, type QualityKey } from '../editor/renderVideo';
+import { videoInfo, extractFrames } from '../../modules/video-frames';
 import Cropper from '../SquareCropper';
+import { Slider } from '../editor/controls';
 
-type Item = { id: string; uri: string; w: number; h: number; maybeAnimated: boolean };
+type Item = {
+  id: string; uri: string; w: number; h: number; maybeAnimated: boolean;
+  video?: { durationMs: number };  // set for clips
+  poster?: string;                 // still frame shown in the cropper
+};
 const { width: SCREEN_W } = Dimensions.get('window');
 const BOX = Math.min(SCREEN_W - 44, 380);
 const EDGE = (SCREEN_W - BOX) / 2; // everything aligns to the crop box edges
@@ -30,6 +37,9 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
+  const [startMs, setStartMs] = useState(0);       // clip start
+  const [clipMs, setClipMs] = useState(MAX_CLIP_MS); // clip length
+  const [quality, setQuality] = useState<QualityKey>('balanced');
   const launched = useRef(false);
 
   // Save target: a queue of free slots starting at startSlot (wrapping around to
@@ -60,15 +70,55 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
     launched.current = true;
     (async () => {
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'], allowsMultipleSelection: true, quality: 1,
+        mediaTypes: ['images', 'videos'], allowsMultipleSelection: true, quality: 1,
       });
       if (res.canceled || !res.assets?.length) { nav.pop(); return; }
-      setItems(res.assets.map((a, i) => ({
-        id: `${Date.now()}-${i}`, uri: a.uri, w: a.width ?? 512, h: a.height ?? 512,
-        maybeAnimated: maybeAnimatedSource(a.uri, a.mimeType ?? a.fileName ?? null),
-      })));
+      const picked: Item[] = [];
+      for (let i = 0; i < res.assets.length; i++) {
+        const a = res.assets[i];
+        const item: Item = {
+          id: `${Date.now()}-${i}`, uri: a.uri, w: a.width ?? 512, h: a.height ?? 512,
+          maybeAnimated: maybeAnimatedSource(a.uri, a.mimeType ?? a.fileName ?? null),
+        };
+        // A clip needs its length, plus a still to aim the cropper at.
+        if (a.type === 'video' || /\.(mov|mp4|m4v)$/i.test(a.uri)) {
+          const info = await videoInfo(a.uri);
+          if (info && info.durationMs > 0) {
+            item.video = { durationMs: info.durationMs };
+            if (info.width && info.height) { item.w = info.width; item.h = info.height; }
+            try { item.poster = (await extractFrames(a.uri, 0, 0, 1, 720))[0]; } catch {}
+          }
+        }
+        picked.push(item);
+      }
+      setItems(picked);
     })();
   }, [nav]);
+
+  // A clip can be shorter than the chosen length.
+  const effClip = (it: Item) => Math.min(clipMs, it.video?.durationMs ?? clipMs);
+
+  // Show the frame the clip actually starts on, so you crop what you'll get.
+  // Extraction is far slower than the finger, so only the last scrub position is
+  // ever decoded, and only once the slider goes quiet.
+  const posterSeq = useRef(0);
+  const posterTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (posterTimer.current) clearTimeout(posterTimer.current); }, []);
+
+  const schedulePoster = (it: Item, atMs: number) => {
+    if (!it.video) return;
+    if (posterTimer.current) clearTimeout(posterTimer.current);
+    posterTimer.current = setTimeout(async () => {
+      const seq = ++posterSeq.current;
+      try {
+        const [frame] = await extractFrames(it.uri, atMs, 0, 1, 720);
+        if (seq !== posterSeq.current || !frame) return; // a newer scrub won
+        setItems((prev) => prev && prev.map((x) => (x.id === it.id ? { ...x, poster: frame } : x)));
+      } catch {
+        // keep the previous poster
+      }
+    }, 180);
+  };
 
   // Integer square crop rect, fully inside the image.
   const cropRect = (it: Item, centered: boolean) => {
@@ -103,7 +153,9 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   const renderAndStore = async (it: Item, centered: boolean) => {
     const crop = cropRect(it, centered);
     // Normalize once at import (iPhone HEIC etc. -> a format Skia can decode).
-    const srcUri = await ensureDecodableUri(it.uri);
+    // A clip keeps its poster frame as the stored source: the video itself is not
+    // ours to copy into app storage.
+    const srcUri = it.video ? (it.poster ?? it.uri) : await ensureDecodableUri(it.uri);
     // Keep the source + an editable document behind the sticker (future editing).
     const asset = await createAsset(srcUri, it.w, it.h);
     if (srcUri !== it.uri) await deleteFile(srcUri); // transcode temp no longer needed
@@ -124,7 +176,15 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
       // Animated sources (GIF / animated WebP) keep their animation: every frame is
       // cropped identically and re-encoded as a looping GIF. Static -> flat PNG.
       let tmp: string | null = null;
-      if (it.maybeAnimated) {
+      if (it.video) {
+        tmp = await renderVideoSticker(
+          it.uri,
+          { ...crop, videoW: it.w, videoH: it.h },
+          { startMs, durationMs: effClip(it), quality },
+          (done, total) => setProgress(`clip · frame ${done}/${total}`),
+        );
+        setProgress(null);
+      } else if (it.maybeAnimated) {
         try {
           tmp = await renderCroppedGif(asset.localUri, crop, (done, total) => {
             if (done % 5 === 0 || done === total) setProgress(`animating · frame ${done}/${total}`);
@@ -168,7 +228,7 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
     try {
       await renderAndStore(items[index], false);
       Haptics.selectionAsync();
-      if (index < items.length - 1) { setIndex(index + 1); resetTransform(); }
+      if (index < items.length - 1) { setIndex(index + 1); resetTransform(); setStartMs(0); }
       else finish();
     } catch (e: any) { Alert.alert('Crop failed', String(e?.message || e)); }
     finally { setBusy(false); }
@@ -208,8 +268,41 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
           {busy && progress ? progress : `${index + 1} / ${items.length} · drag to move · pinch to zoom`}
         </Text>
 
-        <Cropper key={cur.id} uri={cur.uri} imgW={cur.w} imgH={cur.h}
-          viewW={BOX} viewH={BOX} tx={tx} ty={ty} scale={scale} />
+        <Cropper key={`${cur.id}-${cur.poster ?? ''}`} uri={cur.poster ?? cur.uri}
+          imgW={cur.w} imgH={cur.h} viewW={BOX} viewH={BOX} tx={tx} ty={ty} scale={scale} />
+
+        {cur.video ? (
+          <View style={st.clip}>
+            <Text style={st.clipLabel}>
+              Clip · {(startMs / 1000).toFixed(1)}s – {((startMs + effClip(cur)) / 1000).toFixed(1)}s
+              {'   '}of {(cur.video.durationMs / 1000).toFixed(1)}s
+            </Text>
+            <Slider
+              value={startMs}
+              min={0}
+              max={Math.max(1, cur.video.durationMs - effClip(cur))}
+              onChange={(v) => { setStartMs(v); schedulePoster(cur, v); }}
+            />
+            <View style={st.row}>
+              {[1000, 2000, 3000].map((ms) => (
+                <Pressable key={ms} onPress={() => setClipMs(ms)}
+                  style={[st.chip, clipMs === ms && st.chipOn]}
+                  disabled={cur.video!.durationMs < ms}>
+                  <Text style={[st.chipTxt, clipMs === ms && st.chipTxtOn,
+                    cur.video!.durationMs < ms && { opacity: 0.35 }]}>{ms / 1000}s</Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={st.row}>
+              {(Object.keys(QUALITY) as QualityKey[]).map((k) => (
+                <Pressable key={k} onPress={() => setQuality(k)}
+                  style={[st.chip, quality === k && st.chipOn]}>
+                  <Text style={[st.chipTxt, quality === k && st.chipTxtOn]}>{QUALITY[k].label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         {willSplit ? (
           <Text style={st.splitNote}>
@@ -227,6 +320,16 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
 }
 
 const st = StyleSheet.create({
+  clip: { paddingHorizontal: EDGE, marginTop: 16, gap: 10 },
+  clipLabel: { color: C.muted, fontSize: 13, fontWeight: '500' },
+  row: { flexDirection: 'row', gap: 8 },
+  chip: {
+    flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center',
+    backgroundColor: C.surface2, borderWidth: StyleSheet.hairlineWidth, borderColor: C.line,
+  },
+  chipOn: { backgroundColor: C.accent, borderColor: C.accent },
+  chipTxt: { color: C.text, fontSize: 13, fontWeight: '600' },
+  chipTxtOn: { color: C.ink },
   splitNote: {
     color: C.accent2, fontSize: 12, fontWeight: '600',
     paddingHorizontal: EDGE, marginTop: 14, textAlign: 'center',
