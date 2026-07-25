@@ -6,7 +6,7 @@ import JSZip from 'jszip';
 import { File } from 'expo-file-system';
 import type { Pack, Sticker } from './types';
 import { PACK_MAX } from './types';
-import { addSticker, createPack, ensurePackSlots } from './db';
+import { addSticker, createPack, ensurePackSlots, deletePack } from './db';
 import { writeExport, writeTempBytes, deleteFile } from './storage';
 import {
   staticWebpBase64, animatedWebpBase64, trayPngBase64, isAnimatedSticker,
@@ -56,9 +56,12 @@ export async function importWastickers(
     return f ? (await f.async('string')).trim() : '';
   };
   // Sticker files are sticker-01.webp…; accept any order/extension the zip uses.
+  // Sort by the NUMBER, not the string: packs written without zero padding
+  // ("sticker-2" … "sticker-10") would otherwise come out badly reordered.
+  const numberOf = (n: string) => Number(n.match(/sticker[-_]?(\d+)\./i)?.[1] ?? 0);
   const entries = Object.keys(zip.files)
     .filter((n) => /(^|\/)sticker[-_]?\d+\.(webp|png|gif)$/i.test(n) && !zip.files[n].dir)
-    .sort();
+    .sort((a, b) => numberOf(a) - numberOf(b) || a.localeCompare(b));
   if (!entries.length) throw new Error('That file does not contain any stickers.');
 
   const title = (await read('title.txt')) || 'Imported pack';
@@ -88,6 +91,11 @@ export async function importWastickers(
       if (render) await deleteFile(render);
       if (src) await deleteFile(src);
     }
+  }
+  // A pack where nothing could be decoded is junk — don't leave it behind.
+  if (ok === 0) {
+    await deletePack(pack.id);
+    throw new Error('None of the stickers in that file could be read.');
   }
   return { name: pack.name, stickers: ok, skipped };
 }

@@ -10,6 +10,15 @@ const SCHEMA_VERSION = 5;
 const mapSticker = (s: Sticker): Sticker => ({ ...s, uri: toAbs(s.uri) });
 const mapAsset = (a: Asset): Asset => ({ ...a, localUri: toAbs(a.localUri) });
 
+// Adding a column twice is not an error worth failing a launch over: a migration
+// interrupted midway (iOS killing the app during a cold start) would otherwise
+// replay and throw "duplicate column name" on every launch afterwards.
+async function addColumn(d: SQLite.SQLiteDatabase, table: string, column: string, decl: string) {
+  const cols = await d.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  if (cols.some((c) => c.name === column)) return;
+  await d.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+}
+
 let dbP: Promise<SQLite.SQLiteDatabase> | null = null;
 function db(): Promise<SQLite.SQLiteDatabase> {
   if (!dbP) {
@@ -44,12 +53,12 @@ function db(): Promise<SQLite.SQLiteDatabase> {
       }
       if (version < 3 && version >= 1) {
         // v3: pack author (for WhatsApp pack metadata). Fresh installs get it via v1 below.
-        try { await d.execAsync(`ALTER TABLE packs ADD COLUMN author TEXT NOT NULL DEFAULT ''`); } catch {}
+        await addColumn(d, 'packs', 'author', `TEXT NOT NULL DEFAULT ''`);
       }
       if (version < 2) {
         // P2: non-destructive edit model — source assets + per-sticker documents.
+        await addColumn(d, 'stickers', 'documentId', 'TEXT');
         await d.execAsync(`
-          ALTER TABLE stickers ADD COLUMN documentId TEXT;
           CREATE TABLE IF NOT EXISTS assets (
             id TEXT PRIMARY KEY,
             kind TEXT NOT NULL,
@@ -83,11 +92,16 @@ function db(): Promise<SQLite.SQLiteDatabase> {
       if (version < 5) {
         // v5: an emoji per sticker. Telegram requires at least one; WhatsApp uses
         // them to make stickers searchable.
-        try { await d.execAsync(`ALTER TABLE stickers ADD COLUMN emoji TEXT NOT NULL DEFAULT ''`); } catch {}
+        await addColumn(d, 'stickers', 'emoji', `TEXT NOT NULL DEFAULT ''`);
       }
       await d.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
       return d;
-    })();
+    })().catch((e) => {
+      // Never cache a rejection: a transient open/migration failure would
+      // otherwise brick every later call until the app is force-quit.
+      dbP = null;
+      throw e;
+    });
   }
   return dbP;
 }
@@ -195,6 +209,7 @@ export async function duplicatePack(id: string): Promise<Pack> {
   const copiedFiles: string[] = [];
   const copiedDocs: string[] = [];
   try {
+    let newCoverId: string | null = null;
     for (const s of stickers) {
       const nid = newId();
       const uri = await saveRender(toAbs(s.uri), nid);
@@ -203,11 +218,14 @@ export async function duplicatePack(id: string): Promise<Pack> {
       const newDocId = s.documentId ? await cloneDocumentDeep(s.documentId) : null;
       if (newDocId) copiedDocs.push(newDocId);
       const now = Date.now();
+      // Carry the emoji across too — the copy should be a copy.
       await d.runAsync(
-        `INSERT INTO stickers (id,packId,uri,documentId,width,height,sortIndex,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)`,
-        [nid, copy.id, toRel(uri), newDocId, s.width, s.height, s.sortIndex, now, now],
+        `INSERT INTO stickers (id,packId,uri,documentId,emoji,width,height,sortIndex,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [nid, copy.id, toRel(uri), newDocId, s.emoji ?? '', s.width, s.height, s.sortIndex, now, now],
       );
+      if (src.coverStickerId && s.id === src.coverStickerId) newCoverId = nid;
     }
+    if (newCoverId) await setPackCover(copy.id, newCoverId);
     return copy;
   } catch (e) {
     // roll back: remove the copy pack (cascades rows) + its copied files + cloned docs/assets

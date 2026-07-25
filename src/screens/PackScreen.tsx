@@ -230,6 +230,10 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     ]);
   };
 
+  // While an export is reading sticker files, deleting one (or leaving the screen)
+  // would pull the ground out from under it.
+  const locked = busy || waBusy;
+
   // Fixed slots 0..PACK_MAX-1: stickers sit in their own slot, the rest stay empty.
   const bySlot = new Map(stickers.map((s) => [s.sortIndex, s]));
   const firstFree = Array.from({ length: PACK_MAX }, (_, i) => i).find((i) => !bySlot.has(i)) ?? -1;
@@ -237,7 +241,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
-      <Header title={name} onBack={nav.pop}
+      <Header title={name} onBack={locked ? undefined : nav.pop}
         right={<NavCircle icon="ellipsis-horizontal" onPress={packMenu} disabled={busy || waBusy} />} />
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
@@ -250,7 +254,8 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
             const s = bySlot.get(i);
             if (s) {
               return (
-                <Pressable key={s.id} style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
+                <Pressable key={s.id} disabled={locked}
+                  style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
                   onPress={() => stickerMenu(s)}>
                   <Image source={{ uri: s.uri }} style={styles.tileImg} contentFit="cover"
                     transition={140} cachePolicy="none" />
@@ -264,7 +269,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
             }
             const next = i === firstFree;
             return (
-              <Pressable key={`slot-${i}`}
+              <Pressable key={`slot-${i}`} disabled={locked}
                 style={({ pressed }) => [styles.tile, styles.slot, next && styles.slotNext, pressed && styles.pressed]}
                 onPress={() => addAt(i)}>
                 {next ? <Ionicons name="add" size={24} color={C.accent} /> : null}

@@ -30,6 +30,7 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   const [packs, setPacks] = useState<Pack[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
@@ -45,9 +46,11 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   const load = useCallback(async () => {
     try {
       const r = await listPacks();
-      if (mounted.current) setPacks(r);
+      if (mounted.current) { setPacks(r); setLoadError(null); }
     } catch (e: any) {
-      if (mounted.current) Alert.alert('Could not load your packs', String(e?.message || e));
+      // Distinct from "no packs yet" — otherwise a failure looks like an empty
+      // library and there is nothing to retry with.
+      if (mounted.current) setLoadError(String(e?.message || e));
     } finally {
       if (mounted.current) setLoading(false);
     }
@@ -129,15 +132,22 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
     ]);
   };
 
+  // Alert onPress handlers are fire-and-forget: without this a repository error
+  // is swallowed and the action just appears to do nothing.
+  const run = async (fn: () => Promise<unknown>, failure: string) => {
+    try { await fn(); } catch (e: any) { Alert.alert(failure, String(e?.message || e)); }
+    finally { load(); }
+  };
+
   const onMenu = (p: Pack) => {
     Alert.alert(p.name, undefined, [
       { text: 'Edit name & author', onPress: () => onEdit(p) },
-      { text: 'Duplicate', onPress: async () => { await duplicatePack(p.id); load(); } },
+      { text: 'Duplicate', onPress: () => run(() => duplicatePack(p.id), 'Could not duplicate') },
       {
         text: 'Delete', style: 'destructive',
         onPress: () => Alert.alert('Delete pack?', `"${p.name}" and its stickers will be removed.`, [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: async () => { await deletePack(p.id); load(); } },
+          { text: 'Delete', style: 'destructive', onPress: () => run(() => deletePack(p.id), 'Could not delete') },
         ]),
       },
       { text: 'Cancel', style: 'cancel' },

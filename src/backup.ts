@@ -8,6 +8,7 @@ import type { Pack, Sticker } from './types';
 import { PACK_MAX } from './types';
 import {
   listPacks, listStickers, createPack, addSticker, ensurePackSlots,
+  setStickerEmoji, setPackCover, deletePack,
 } from './db';
 import { writeTempBytes, writeExport, deleteFile } from './storage';
 
@@ -19,9 +20,13 @@ export const BACKUP_VERSION = 1;
 // Every field added after v1 must be optional on read, so old backups keep working.
 type ManifestSticker = {
   file: string; slot: number; width: number; height: number;
-  createdAt?: number; animated?: boolean;
+  emoji?: string; createdAt?: number; animated?: boolean;
 };
-type ManifestPack = { name: string; author: string; createdAt?: number; stickers: ManifestSticker[] };
+type ManifestPack = {
+  name: string; author: string; createdAt?: number;
+  coverFile?: string; // which sticker is the pack icon
+  stickers: ManifestSticker[];
+};
 type Manifest = { app: 'sticker-studio'; version: number; exportedAt: number; packs: ManifestPack[] };
 
 const extOf = (uri: string) => {
@@ -54,8 +59,9 @@ export async function exportPacksToZip(
       folder.file(name, await f.bytes());
       entry.stickers.push({
         file: name, slot: s.sortIndex, width: s.width, height: s.height,
-        createdAt: s.createdAt, animated: ext === 'gif',
+        emoji: s.emoji || undefined, createdAt: s.createdAt, animated: ext === 'gif',
       });
+      if (p.coverStickerId === s.id) entry.coverFile = name;
       onProgress?.(++done, total);
     }
     manifest.packs.push(entry);
@@ -98,27 +104,36 @@ export async function importPacksFromZip(
   const total = manifest.packs.reduce((n, p) => n + p.stickers.length, 0);
   let done = 0, restored = 0, skipped = 0;
 
+  let packsMade = 0;
   for (const mp of manifest.packs) {
     const pack = await createPack(mp.name, mp.author ?? '');
     await ensurePackSlots(pack.id);
+    let inThisPack = 0;
     for (const ms of mp.stickers.slice(0, PACK_MAX)) {
       const entry = zip.file(`stickers/${ms.file}`);
       onProgress?.(++done, total);
       if (!entry) { skipped++; continue; }
       // Land the bytes on disk first, then let the repository own the copy.
-      const tmp = await writeTempBytes(await entry.async('uint8array'), extOf(ms.file));
+      let tmp = '';
       try {
-        await addSticker(pack.id, tmp, ms.width || 512, ms.height || 512, null,
+        tmp = await writeTempBytes(await entry.async('uint8array'), extOf(ms.file));
+        const added = await addSticker(pack.id, tmp, ms.width || 512, ms.height || 512, null,
           Number.isInteger(ms.slot) ? ms.slot : null);
-        restored++;
+        if (ms.emoji) await setStickerEmoji(added.id, ms.emoji);
+        if (mp.coverFile === ms.file) await setPackCover(pack.id, added.id);
+        restored++; inThisPack++;
       } catch {
+        // One unreadable sticker must not abort the whole restore.
         skipped++;
       } finally {
-        await deleteFile(tmp);
+        if (tmp) await deleteFile(tmp);
       }
     }
+    // Don't leave an empty shell behind if nothing in it could be read.
+    if (inThisPack === 0) await deletePack(pack.id);
+    else packsMade++;
   }
-  return { packs: manifest.packs.length, stickers: restored, skipped };
+  return { packs: packsMade, stickers: restored, skipped };
 }
 
 // ------------------------------------------------------------------ helpers

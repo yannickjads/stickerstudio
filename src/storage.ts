@@ -27,7 +27,10 @@ export function initStorage(): Promise<void> {
       } catch {
         // best-effort
       }
-    })();
+    })().catch((e) => {
+      ready = null; // a failed setup must be retryable, not cached forever
+      throw e;
+    });
   }
   return ready;
 }

@@ -59,11 +59,18 @@ jobs:
       - name: Prebuild
         run: npx expo prebuild --platform ios --no-install
 
+      # Assert, don't just print: without this the missing-build-number bug
+      # (which made iOS silently refuse to install new builds) comes back unnoticed.
       - name: Verify build number reached the app
         run: |
+          set -euo pipefail
           PLIST=$(ls ios/*/Info.plist | head -1)
-          echo "CFBundleVersion: $(plutil -extract CFBundleVersion raw "$PLIST")"
-          echo "CFBundleShortVersionString: $(plutil -extract CFBundleShortVersionString raw "$PLIST")"
+          GOT=$(plutil -extract CFBundleVersion raw "$PLIST")
+          echo "CFBundleVersion=$GOT  CFBundleShortVersionString=$(plutil -extract CFBundleShortVersionString raw "$PLIST")"
+          if [ "$GOT" != "$GITHUB_RUN_NUMBER" ]; then
+            echo "::error::CFBundleVersion is '$GOT' but should be '$GITHUB_RUN_NUMBER' — iOS would not replace the installed app."
+            exit 1
+          fi
 
       - name: Install CocoaPods
         run: |
@@ -179,11 +186,22 @@ jobs:
           body: |
             Ad-hoc build for registered devices.
 
-            **Install:** open the install page on your iPhone —
-            https://yannickjads.github.io/stickerstudio-privacy/install.html
+            **Install:** open this on your iPhone —
+            https://yannickjads.github.io/stickerstudio/
           files: |
             dist/StickerStudio.ipa
             dist/manifest.plist
+
+      # The install page is the whole point of the pipeline — prove it resolves
+      # and that the manifest it will fetch really points at this release.
+      - name: Smoke-check the install path
+        run: |
+          set -euo pipefail
+          curl -fsS https://yannickjads.github.io/stickerstudio/ | grep -q 'itms-services'
+          MANIFEST="https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.assets.outputs.tag }}/manifest.plist"
+          curl -fsSL "$MANIFEST" | grep -q 'StickerStudio.ipa'
+          curl -fsSLI "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.assets.outputs.tag }}/StickerStudio.ipa" > /dev/null
+          echo "install page + manifest + ipa all reachable"
 
       - uses: actions/upload-artifact@v4
         with:
