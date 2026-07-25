@@ -99,11 +99,16 @@ const ORDER = 'sortIndex ASC, createdAt ASC, id ASC';
 export async function listPacks(): Promise<Pack[]> {
   const d = await db();
   // Cover = the sticker the user picked, else the first one in the pack.
+  // Two separate lookups on purpose: SQLite does NOT resolve an outer column
+  // (p.coverStickerId) inside a subquery's ORDER BY — doing so throws
+  // "no such column" and takes the whole screen down with it.
   const rows = await d.getAllAsync<Pack>(`
     SELECT p.*,
       (SELECT COUNT(*) FROM stickers s WHERE s.packId = p.id) AS count,
-      (SELECT s2.uri FROM stickers s2 WHERE s2.packId = p.id
-         ORDER BY (s2.id = p.coverStickerId) DESC, s2.${ORDER} LIMIT 1) AS cover
+      COALESCE(
+        (SELECT sc.uri FROM stickers sc WHERE sc.id = p.coverStickerId AND sc.packId = p.id),
+        (SELECT s2.uri FROM stickers s2 WHERE s2.packId = p.id ORDER BY s2.${ORDER} LIMIT 1)
+      ) AS cover
     FROM packs p
     ORDER BY p.${ORDER}
   `);
@@ -146,16 +151,23 @@ export async function setPackCover(packId: string, stickerId: string | null): Pr
 }
 
 // Sticker to use as the pack's icon: the chosen one, else the first in the pack.
+// Deliberately two plain queries rather than a JOIN — joining packs and stickers
+// makes `createdAt` (and `id`) ambiguous in the shared ORDER clause.
 export async function getPackCoverSticker(packId: string): Promise<Sticker | null> {
   const d = await db();
-  const r = await d.getFirstAsync<Sticker>(`
-    SELECT s.* FROM stickers s
-    JOIN packs p ON p.id = s.packId
-    WHERE s.packId = ?
-    ORDER BY (s.id = p.coverStickerId) DESC, s.${ORDER}
-    LIMIT 1
-  `, [packId]);
-  return r ? mapSticker(r) : null;
+  const pack = await d.getFirstAsync<{ coverStickerId: string | null }>(
+    `SELECT coverStickerId FROM packs WHERE id=?`, [packId],
+  );
+  if (pack?.coverStickerId) {
+    const chosen = await d.getFirstAsync<Sticker>(
+      `SELECT * FROM stickers WHERE id=? AND packId=?`, [pack.coverStickerId, packId],
+    );
+    if (chosen) return mapSticker(chosen);
+  }
+  const first = await d.getFirstAsync<Sticker>(
+    `SELECT * FROM stickers WHERE packId=? ORDER BY ${ORDER} LIMIT 1`, [packId],
+  );
+  return first ? mapSticker(first) : null;
 }
 
 export async function updatePack(id: string, name: string, author: string): Promise<void> {

@@ -45,13 +45,17 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
   useEffect(() => () => { mounted.current = false; }, []);
 
   const load = useCallback(async () => {
-    await ensurePackSlots(packId); // migrate legacy sort indexes -> fixed slots
-    const [p, list] = await Promise.all([getPack(packId), listStickers(packId)]);
-    if (!mounted.current) return;
-    if (!p) { nav.pop(); return; }
-    setPack(p);
-    setName(p.name);
-    setStickers(list);
+    try {
+      await ensurePackSlots(packId); // migrate legacy sort indexes -> fixed slots
+      const [p, list] = await Promise.all([getPack(packId), listStickers(packId)]);
+      if (!mounted.current) return;
+      if (!p) { nav.pop(); return; }
+      setPack(p);
+      setName(p.name);
+      setStickers(list);
+    } catch (e: any) {
+      if (mounted.current) Alert.alert('Could not open this pack', String(e?.message || e));
+    }
   }, [packId, nav]);
   useEffect(() => { load(); }, [load]);
 

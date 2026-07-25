@@ -30,9 +30,17 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
+  // A failure here used to leave `loading` true forever, which rendered a blank
+  // screen with no explanation. Always clear it, and say what went wrong.
   const load = useCallback(async () => {
-    const r = await listPacks();
-    if (mounted.current) { setPacks(r); setLoading(false); }
+    try {
+      const r = await listPacks();
+      if (mounted.current) setPacks(r);
+    } catch (e: any) {
+      if (mounted.current) Alert.alert('Could not load your packs', String(e?.message || e));
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
   }, []);
   useEffect(() => { load(); }, [load]);
 
