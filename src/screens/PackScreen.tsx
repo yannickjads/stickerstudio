@@ -28,9 +28,10 @@ const COLS = 4;
 const MIN_GAP = 10;
 // The grid must span exactly EDGE..(width-EDGE) so it lines up with the header
 // and the footer button: floor the tile, then absorb the remainder into the gaps.
-const AVAIL = SCREEN_W - EDGE * 2;
-const THUMB = Math.floor((AVAIL - MIN_GAP * (COLS - 1)) / COLS);
-const GAP = (AVAIL - THUMB * COLS) / (COLS - 1);
+const AVAIL = Math.max(0, SCREEN_W - EDGE * 2);
+// Clamped so a bad measurement can never collapse the tiles to nothing.
+const THUMB = Math.max(44, Math.floor((AVAIL - MIN_GAP * (COLS - 1)) / COLS) || 44);
+const GAP = Math.max(0, (AVAIL - THUMB * COLS) / (COLS - 1)) || MIN_GAP;
 
 export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId: string; packName: string }) {
   const insets = useSafeAreaInsets();
@@ -287,12 +288,14 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   tileImg: { width: '100%', height: '100%' },
-  // Every empty slot is outlined; the next one up is the only bright one.
+  // Every empty slot is outlined so the whole pack reads as a grid; the next one
+  // up is the only bright one. The fill matters: a dashed outline alone sits at
+  // ~1.5:1 against this background, which is invisible in practice.
   slot: {
-    backgroundColor: 'transparent',
-    borderWidth: 1.5, borderStyle: 'dashed', borderColor: C.line,
+    backgroundColor: C.surface,
+    borderWidth: 1.5, borderStyle: 'dashed', borderColor: C.dash,
   },
-  slotNext: { borderColor: C.accent },
+  slotNext: { backgroundColor: C.tint, borderColor: C.accent },
   pressed: { opacity: 0.6 },
   // Marks the sticker used as the pack's icon everywhere it's exported.
   coverBadge: {

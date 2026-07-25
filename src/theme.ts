@@ -10,6 +10,7 @@ export const C = {
   accent: '#22d3ee',
   accent2: '#f472b6',
   tint: 'rgba(34, 211, 238, 0.14)', // tinted fills behind accent symbols (iOS style)
+  dash: '#59607a',                  // empty-slot outline: visible, but quieter than accent
   good: '#34d399',
   bad: '#f87171',
   ink: '#06121a',

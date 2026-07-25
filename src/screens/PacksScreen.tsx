@@ -17,9 +17,9 @@ import * as Sharing from 'expo-sharing';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 // Same edge-to-edge rule as the sticker grid: whole-pixel cards, remainder in the gap.
-const AVAIL = SCREEN_W - EDGE * 2;
-const CARD = Math.floor((AVAIL - 12) / 2);
-const GAP = AVAIL - CARD * 2;
+const AVAIL = Math.max(0, SCREEN_W - EDGE * 2);
+const CARD = Math.max(80, Math.floor((AVAIL - 12) / 2) || 150);
+const GAP = Math.max(0, AVAIL - CARD * 2) || 12;
 
 export default function PacksScreen({ nav }: { nav: Nav }) {
   const insets = useSafeAreaInsets();
