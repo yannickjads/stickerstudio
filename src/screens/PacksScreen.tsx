@@ -11,6 +11,7 @@ import { PACK_MAX } from '../types';
 import { listPacks, createPack, updatePack, duplicatePack, deletePack } from '../db';
 import { nativePrompt } from '../../modules/native-prompt';
 import { exportAllPacks, importPacksFromZip } from '../backup';
+import { importWastickers, isWastickersFile } from '../wastickers';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 
@@ -69,29 +70,39 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
     finally { setBusy(false); }
   };
 
+  // Accepts our own .zip backups and .wastickers packs from other sticker apps.
   const restore = async () => {
     if (busy) return;
     const res = await DocumentPicker.getDocumentAsync({
-      type: ['application/zip', 'public.zip-archive'], copyToCacheDirectory: true,
+      type: ['application/zip', 'public.zip-archive', 'com.stickerstudio.wastickers', 'public.data'],
+      copyToCacheDirectory: true,
     });
     if (res.canceled || !res.assets?.length) return;
+    const uri = res.assets[0].uri;
     setBusy(true);
     try {
-      const r = await importPacksFromZip(res.assets[0].uri);
-      await load();
-      Alert.alert(
-        'Restored',
-        `${r.stickers} sticker${r.stickers === 1 ? '' : 's'} in ${r.packs} pack${r.packs === 1 ? '' : 's'}.`
-        + (r.skipped ? `\n${r.skipped} could not be read.` : ''),
-      );
-    } catch (e: any) { Alert.alert('Restore failed', String(e?.message || e)); }
+      if (isWastickersFile(uri) || /\.wastickers$/i.test(res.assets[0].name ?? '')) {
+        const r = await importWastickers(uri);
+        await load();
+        Alert.alert('Imported', `${r.name} · ${r.stickers} sticker${r.stickers === 1 ? '' : 's'}`
+          + (r.skipped ? `\n${r.skipped} could not be read.` : ''));
+      } else {
+        const r = await importPacksFromZip(uri);
+        await load();
+        Alert.alert(
+          'Restored',
+          `${r.stickers} sticker${r.stickers === 1 ? '' : 's'} in ${r.packs} pack${r.packs === 1 ? '' : 's'}.`
+          + (r.skipped ? `\n${r.skipped} could not be read.` : ''),
+        );
+      }
+    } catch (e: any) { Alert.alert('Import failed', String(e?.message || e)); }
     finally { setBusy(false); }
   };
 
   const appMenu = () => {
     Alert.alert('Sticker Studio', undefined, [
       { text: 'Back up all packs (.zip)', onPress: backUpAll },
-      { text: 'Restore from backup…', onPress: restore },
+      { text: 'Import pack or backup…', onPress: restore },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };

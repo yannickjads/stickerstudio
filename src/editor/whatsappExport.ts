@@ -19,7 +19,7 @@ export function isAnimatedSticker(s: Sticker): boolean {
 
 const b64Bytes = (b64: string) => Math.floor(b64.length * 3 / 4);
 
-async function staticWebpBase64(uri: string): Promise<string> {
+export async function staticWebpBase64(uri: string): Promise<string> {
   const img = await loadSkImage(uri);
   for (const q of [90, 75, 55, 35]) {
     const b64 = img.encodeToBase64(ImageFormat.WEBP, q);
@@ -48,7 +48,7 @@ async function stillAsAnimatedWebpBase64(uri: string): Promise<string> {
 
 // Decode our 512×512 GIF render and re-encode as animated WebP under 500 KB,
 // dropping quality (and finally sampling every 2nd frame) until it fits.
-async function animatedWebpBase64(uri: string): Promise<string> {
+export async function animatedWebpBase64(uri: string): Promise<string> {
   const data = await Skia.Data.fromURI(uri);
   const anim = Skia.AnimatedImage.MakeAnimatedImageFromEncoded(data);
   if (!anim) throw new Error('Could not decode the animated sticker.');
@@ -92,7 +92,7 @@ async function animatedWebpBase64(uri: string): Promise<string> {
   }
 }
 
-async function trayPngBase64(uri: string): Promise<string> {
+export async function trayPngBase64(uri: string): Promise<string> {
   const img = await loadSkImage(uri); // first frame for GIFs
   const surface = Skia.Surface.Make(96, 96);
   if (!surface) throw new Error('Could not render the tray icon.');

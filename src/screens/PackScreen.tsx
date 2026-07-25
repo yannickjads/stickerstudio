@@ -18,6 +18,7 @@ import {
 import { nativePrompt } from '../../modules/native-prompt';
 import { buildWhatsAppPayload, isAnimatedSticker, WA_MIN_STICKERS } from '../editor/whatsappExport';
 import { exportPacksToZip } from '../backup';
+import { exportWastickers } from '../wastickers';
 import { isWhatsAppInstalled, sendStickerPackToWhatsApp } from '../../modules/whatsapp-stickers';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -145,11 +146,25 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     finally { setBusy(false); }
   };
 
+  // .wastickers is what other sticker apps read — useful for sharing a pack with
+  // someone who doesn't have this app.
+  const exportWa = async () => {
+    if (!pack || busy) return;
+    setBusy(true);
+    try {
+      const cover = await getPackCoverSticker(packId);
+      const file = await exportWastickers(pack, stickers, cover?.uri);
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file);
+    } catch (e: any) { Alert.alert('Export failed', String(e?.message || e)); }
+    finally { setBusy(false); }
+  };
+
   const packMenu = () => {
     Haptics.selectionAsync();
     Alert.alert(name, pack?.author ? `by ${pack.author}` : undefined, [
       { text: 'Edit name & author', onPress: editPack },
       { text: 'Back up pack (.zip)', onPress: exportPack },
+      { text: 'Export as .wastickers', onPress: exportWa },
       { text: 'Save all to Photos', onPress: saveAllToPhotos },
       {
         text: 'Delete pack', style: 'destructive',

@@ -14,7 +14,31 @@
       "infoPlist": {
         "CFBundleDisplayName": "Sticker Studio",
         "ITSAppUsesNonExemptEncryption": false,
-        "LSApplicationQueriesSchemes": ["whatsapp"],
+        "LSApplicationQueriesSchemes": ["whatsapp", "tg"],
+        "UTImportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "com.stickerstudio.wastickers",
+            "UTTypeDescription": "Sticker pack",
+            "UTTypeConformsTo": ["public.zip-archive"],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": ["wastickers"]
+            }
+          }
+        ],
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Sticker pack",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Owner",
+            "LSItemContentTypes": ["com.stickerstudio.wastickers"]
+          },
+          {
+            "CFBundleTypeName": "Sticker Studio backup",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": ["public.zip-archive"]
+          }
+        ],
         "NSPhotoLibraryUsageDescription": "Sticker Studio needs access to your photos so you can turn them into stickers.",
         "NSPhotoLibraryAddUsageDescription": "Sticker Studio saves your finished stickers to your Photos."
       }
