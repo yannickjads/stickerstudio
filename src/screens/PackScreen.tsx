@@ -204,20 +204,29 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
 
   const packMenu = () => {
     Haptics.selectionAsync();
+    const hasStickers = stickers.length > 0;
+    // Renaming and deleting must stay reachable for an empty pack — only the
+    // export actions depend on there being stickers.
     Alert.alert(name, pack?.author ? `by ${pack.author}` : undefined, [
       { text: 'Edit name & author', onPress: editPack },
-      { text: 'Back up pack (.zip)', onPress: exportPack },
-      { text: 'Add to Telegram', onPress: sendToTelegram },
-      { text: 'Export as .wastickers', onPress: exportWa },
-      { text: 'Save all to Photos', onPress: saveAllToPhotos },
+      ...(hasStickers ? [
+        { text: 'Back up pack (.zip)', onPress: exportPack },
+        { text: 'Add to Telegram', onPress: sendToTelegram },
+        { text: 'Export as .wastickers', onPress: exportWa },
+        { text: 'Save all to Photos', onPress: saveAllToPhotos },
+      ] : []),
       {
-        text: 'Delete pack', style: 'destructive',
-        onPress: () => Alert.alert('Delete pack?', `"${name}" and its stickers will be removed.`, [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: async () => { await deletePack(packId); nav.pop(); } },
-        ]),
+        text: 'Delete pack', style: 'destructive' as const,
+        onPress: () => Alert.alert(
+          'Delete pack?',
+          hasStickers ? `"${name}" and its stickers will be removed.` : `"${name}" will be removed.`,
+          [
+            { text: 'Cancel', style: 'cancel' as const },
+            { text: 'Delete', style: 'destructive' as const, onPress: async () => { await deletePack(packId); nav.pop(); } },
+          ],
+        ),
       },
-      { text: 'Cancel', style: 'cancel' },
+      { text: 'Cancel', style: 'cancel' as const },
     ]);
   };
 
@@ -229,7 +238,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
       <Header title={name} onBack={nav.pop}
-        right={<NavCircle icon="ellipsis-horizontal" onPress={packMenu} disabled={!stickers.length} />} />
+        right={<NavCircle icon="ellipsis-horizontal" onPress={packMenu} disabled={busy || waBusy} />} />
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         <Text style={styles.capacity}>
