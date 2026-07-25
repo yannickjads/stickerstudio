@@ -4,10 +4,10 @@ import type { Pack, Sticker, Asset, EditorDocument } from './types';
 import { PACK_MAX } from './types';
 import { newId, saveRender, saveAsset, deleteRender, deleteFile, toAbs, toRel } from './storage';
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 // Rows store paths relative to the studio dir (see storage.ts) — resolve on read.
-const mapSticker = (s: Sticker): Sticker => ({ ...s, uri: toAbs(s.uri) });
+const mapSticker = (s: Sticker): Sticker => ({ ...s, uri: toAbs(s.uri), animated: !!s.animated });
 const mapAsset = (a: Asset): Asset => ({ ...a, localUri: toAbs(a.localUri) });
 
 // Adding a column twice is not an error worth failing a launch over: a migration
@@ -93,6 +93,11 @@ function db(): Promise<SQLite.SQLiteDatabase> {
         // v5: an emoji per sticker. Telegram requires at least one; WhatsApp uses
         // them to make stickers searchable.
         await addColumn(d, 'stickers', 'emoji', `TEXT NOT NULL DEFAULT ''`);
+      }
+      if (version < 6) {
+        // v6: whether a sticker moves is a property of the file, not of its name.
+        await addColumn(d, 'stickers', 'animated', 'INTEGER NOT NULL DEFAULT 0');
+        await d.execAsync(`UPDATE stickers SET animated = 1 WHERE lower(uri) LIKE '%.gif'`);
       }
       await d.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
       return d;
@@ -220,8 +225,8 @@ export async function duplicatePack(id: string): Promise<Pack> {
       const now = Date.now();
       // Carry the emoji across too — the copy should be a copy.
       await d.runAsync(
-        `INSERT INTO stickers (id,packId,uri,documentId,emoji,width,height,sortIndex,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-        [nid, copy.id, toRel(uri), newDocId, s.emoji ?? '', s.width, s.height, s.sortIndex, now, now],
+        `INSERT INTO stickers (id,packId,uri,documentId,emoji,animated,width,height,sortIndex,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        [nid, copy.id, toRel(uri), newDocId, s.emoji ?? '', s.animated ? 1 : 0, s.width, s.height, s.sortIndex, now, now],
       );
       if (src.coverStickerId && s.id === src.coverStickerId) newCoverId = nid;
     }
@@ -287,7 +292,7 @@ export async function freeSlots(packId: string): Promise<number[]> {
 
 export async function addSticker(
   packId: string, permanentUri: string, width: number, height: number,
-  documentId: string | null = null, slot: number | null = null,
+  documentId: string | null = null, slot: number | null = null, animated = false,
 ): Promise<Sticker> {
   const d = await db();
   const id = newId();
@@ -297,11 +302,11 @@ export async function addSticker(
   if (free.length === 0) throw new Error('This pack is full.');
   const useSlot = slot != null && free.includes(slot) ? slot : free[0];
   const uri = await saveRender(permanentUri, id); // copy temp render -> permanent
-  const sticker: Sticker = { id, packId, uri, documentId, emoji: '', width, height, sortIndex: useSlot, createdAt: now, updatedAt: now };
+  const sticker: Sticker = { id, packId, uri, documentId, emoji: '', animated, width, height, sortIndex: useSlot, createdAt: now, updatedAt: now };
   try {
     await d.runAsync(
-      `INSERT INTO stickers (id,packId,uri,documentId,width,height,sortIndex,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)`,
-      [id, packId, toRel(uri), documentId, width, height, sticker.sortIndex, now, now],
+      `INSERT INTO stickers (id,packId,uri,documentId,emoji,animated,width,height,sortIndex,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [id, packId, toRel(uri), documentId, '', animated ? 1 : 0, width, height, sticker.sortIndex, now, now],
     );
     await d.runAsync(`UPDATE packs SET updatedAt=? WHERE id=?`, [now, packId]);
   } catch (e) {

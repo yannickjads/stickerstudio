@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Alert, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, Alert, Dimensions, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +28,8 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
@@ -48,6 +50,13 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   useEffect(() => { load(); }, [load]);
 
   const lastAuthor = packs.find((p) => p.author)?.author ?? '';
+
+  // Searching only earns its place once the grid stops fitting on a screen.
+  const SEARCH_FROM = 7;
+  const q = query.trim().toLowerCase();
+  const shown = q
+    ? packs.filter((p) => p.name.toLowerCase().includes(q) || p.author.toLowerCase().includes(q))
+    : packs;
 
   const onNew = async () => {
     const r = await nativePrompt({
@@ -151,10 +160,31 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
       <View style={styles.header}>
         <Text style={styles.title} numberOfLines={1}>Packs</Text>
         <View style={styles.actions}>
+          {packs.length >= SEARCH_FROM ? (
+            <NavCircle icon={searching ? 'close' : 'search'} disabled={busy}
+              onPress={() => { setSearching((v) => !v); setQuery(''); }} />
+          ) : null}
           <NavCircle icon="ellipsis-horizontal" onPress={appMenu} disabled={busy} />
           <NavCircle icon="add" onPress={onNew} disabled={busy} />
         </View>
       </View>
+
+      {searching ? (
+        <View style={styles.searchRow}>
+          <Ionicons name="search" size={16} color={C.muted} />
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search packs"
+            placeholderTextColor={C.muted}
+            autoFocus
+            autoCorrect={false}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+        </View>
+      ) : null}
 
       {loadError ? (
         // A failure must not look like an empty library — say so, and offer a way back.
@@ -172,8 +202,11 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
             style={{ alignSelf: 'stretch', marginHorizontal: 40 }} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.grid}>
-          {packs.map((p) => (
+        <ScrollView contentContainerStyle={styles.grid} keyboardShouldPersistTaps="handled">
+          {q && shown.length === 0 ? (
+            <Text style={styles.noHits}>No packs match “{query.trim()}”.</Text>
+          ) : null}
+          {shown.map((p) => (
             <Pressable
               key={p.id}
               style={({ pressed }) => [styles.card, pressed && { opacity: 0.7 }]}
@@ -214,6 +247,13 @@ const styles = StyleSheet.create({
   },
   title: { color: C.text, fontSize: 30, fontWeight: '700', letterSpacing: 0.2, flexShrink: 1 },
   actions: { flexDirection: 'row', gap: 10 },
+  searchRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginHorizontal: EDGE, marginBottom: 12, paddingHorizontal: 12,
+    height: 38, borderRadius: 10, borderCurve: 'continuous', backgroundColor: C.surface2,
+  },
+  searchInput: { flex: 1, color: C.text, fontSize: 16, padding: 0 },
+  noHits: { width: '100%', color: C.muted, fontSize: 15, paddingVertical: 24, textAlign: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingHorizontal: EDGE, paddingTop: 4, paddingBottom: 30 },
   card: { width: CARD },
   // Square covers, matching the sticker tiles.

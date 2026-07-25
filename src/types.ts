@@ -20,6 +20,7 @@ export type Sticker = {
   uri: string;          // permanent flattened PNG in app storage (for display/thumbnail/export)
   documentId: string | null; // the editable document behind this sticker (P2+)
   emoji: string;        // shown/searched in Telegram + WhatsApp ('' = none set)
+  animated: boolean;    // determined from the file's bytes, not its extension
   width: number;
   height: number;
   sortIndex: number;

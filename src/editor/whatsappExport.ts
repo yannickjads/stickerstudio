@@ -14,7 +14,8 @@ const SIZE = 512;
 export const WA_MIN_STICKERS = 3;
 
 export function isAnimatedSticker(s: Sticker): boolean {
-  return s.uri.toLowerCase().endsWith('.gif');
+  // Recorded when the sticker was made, from the file's own bytes.
+  return s.animated || s.uri.toLowerCase().endsWith('.gif');
 }
 
 const b64Bytes = (b64: string) => Math.floor(b64.length * 3 / 4);

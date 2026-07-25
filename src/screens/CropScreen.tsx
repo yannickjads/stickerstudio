@@ -199,7 +199,8 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
       try {
         // Only materialize the target (and any auto-split pack) once a render exists.
         const target = await ensureCapacity();
-        await addSticker(target.id, tmp, STICKER_SIZE, STICKER_SIZE, doc.id, target.queue[0] ?? null);
+        await addSticker(target.id, tmp, STICKER_SIZE, STICKER_SIZE, doc.id, target.queue[0] ?? null,
+          tmp.toLowerCase().endsWith('.gif'));
         target.queue.shift();
         setRemaining(targetRef.current?.queue.length ?? null);
       } finally {

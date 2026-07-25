@@ -11,6 +11,7 @@ import {
   setStickerEmoji, setPackCover, deletePack,
 } from './db';
 import { writeTempBytes, writeExport, deleteFile } from './storage';
+import { isAnimatedBytes } from './editor/imageKind';
 
 export const BACKUP_VERSION = 1;
 
@@ -116,9 +117,10 @@ export async function importPacksFromZip(
       // Land the bytes on disk first, then let the repository own the copy.
       let tmp = '';
       try {
-        tmp = await writeTempBytes(await entry.async('uint8array'), extOf(ms.file));
+        const bytes = await entry.async('uint8array');
+        tmp = await writeTempBytes(bytes, extOf(ms.file));
         const added = await addSticker(pack.id, tmp, ms.width || 512, ms.height || 512, null,
-          Number.isInteger(ms.slot) ? ms.slot : null);
+          Number.isInteger(ms.slot) ? ms.slot : null, isAnimatedBytes(bytes));
         if (ms.emoji) await setStickerEmoji(added.id, ms.emoji);
         if (mp.coverFile === ms.file) await setPackCover(pack.id, added.id);
         restored++; inThisPack++;
