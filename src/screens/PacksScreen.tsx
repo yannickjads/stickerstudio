@@ -1,10 +1,13 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Alert, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  useSharedValue, useAnimatedScrollHandler, useAnimatedStyle, interpolate, Extrapolation,
+} from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { C } from '../theme';
-import { Btn, LargeHeader, NavCircle, S, EDGE } from '../ui';
+import { Btn, NavCircle, S, EDGE } from '../ui';
 import type { Nav } from '../nav';
 import type { Pack } from '../types';
 import { PACK_MAX } from '../types';
@@ -29,6 +32,13 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
+
+  // Drives the large-title collapse.
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((e) => { scrollY.value = e.contentOffset.y; });
+  const compactTitle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [18, 46], [0, 1], Extrapolation.CLAMP),
+  }));
 
   // A failure here used to leave `loading` true forever, which rendered a blank
   // screen with no explanation. Always clear it, and say what went wrong.
@@ -136,15 +146,15 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
-      <LargeHeader
-        title="Sticker Studio"
-        right={
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <NavCircle icon="ellipsis-horizontal" onPress={appMenu} disabled={busy} />
-            <NavCircle icon="add" onPress={onNew} disabled={busy} />
-          </View>
-        }
-      />
+      {/* Nav bar: actions stay put, a compact title fades in once the big one
+          has scrolled away — the standard iOS large-title behaviour. */}
+      <View style={styles.navBar}>
+        <Animated.Text style={[styles.navTitle, compactTitle]} numberOfLines={1}>Packs</Animated.Text>
+        <View style={styles.navActions}>
+          <NavCircle icon="ellipsis-horizontal" onPress={appMenu} disabled={busy} />
+          <NavCircle icon="add" onPress={onNew} disabled={busy} />
+        </View>
+      </View>
 
       {packs.length === 0 && !loading ? (
         <View style={[S.empty, { flex: 1 }]}>
@@ -153,7 +163,13 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
           <Btn label="New pack" onPress={onNew} style={{ alignSelf: 'stretch', marginHorizontal: 40 }} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.grid}>
+        <Animated.ScrollView
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          contentContainerStyle={styles.grid}
+        >
+          {/* The large title is part of the content, so it scrolls away naturally. */}
+          <Text style={styles.largeTitle}>Packs</Text>
           {packs.map((p) => (
             <Pressable
               key={p.id}
@@ -177,7 +193,7 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
               </View>
             </Pressable>
           ))}
-        </ScrollView>
+        </Animated.ScrollView>
       )}
 
     </View>
@@ -189,7 +205,19 @@ const styles = StyleSheet.create({
     width: 66, height: 66, borderRadius: 20, backgroundColor: C.surface2,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line,
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingHorizontal: EDGE, paddingTop: 8, paddingBottom: 30 },
+  navBar: {
+    height: 44, justifyContent: 'center', paddingHorizontal: EDGE,
+  },
+  navTitle: {
+    position: 'absolute', left: 0, right: 0, textAlign: 'center',
+    color: C.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.2,
+  },
+  navActions: { flexDirection: 'row', gap: 10, alignSelf: 'flex-end' },
+  largeTitle: {
+    width: '100%', color: C.text, fontSize: 34, fontWeight: '700',
+    letterSpacing: 0.2, marginBottom: 10,
+  },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingHorizontal: EDGE, paddingTop: 4, paddingBottom: 30 },
   card: { width: CARD },
   // Square covers, matching the sticker tiles.
   cover: {
