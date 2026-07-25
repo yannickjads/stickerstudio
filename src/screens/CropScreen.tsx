@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSharedValue } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
 import { C } from '../theme';
 import { Btn, Header, NavText, S } from '../ui';
 import type { Nav } from '../nav';
@@ -40,6 +41,7 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   const [startMs, setStartMs] = useState(0);       // clip start
   const [clipMs, setClipMs] = useState(MAX_CLIP_MS); // clip length
   const [quality, setQuality] = useState<QualityKey>('balanced');
+  const [optimize, setOptimize] = useState(true);
   const launched = useRef(false);
 
   // Save target: a queue of free slots starting at startSlot (wrapping around to
@@ -120,6 +122,20 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
     }, 180);
   };
 
+  const clipOptions = () => {
+    Alert.alert('Clip quality', undefined, [
+      ...(Object.keys(QUALITY) as QualityKey[]).map((k) => ({
+        text: quality === k ? `✓  ${QUALITY[k].label}` : QUALITY[k].label,
+        onPress: () => setQuality(k),
+      })),
+      {
+        text: optimize ? '✓  Smaller file size' : 'Smaller file size',
+        onPress: () => setOptimize((v) => !v),
+      },
+      { text: 'Done', style: 'cancel' as const },
+    ]);
+  };
+
   // Integer square crop rect, fully inside the image.
   const cropRect = (it: Item, centered: boolean) => {
     const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
@@ -180,7 +196,7 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
         tmp = await renderVideoSticker(
           it.uri,
           { ...crop, videoW: it.w, videoH: it.h },
-          { startMs, durationMs: effClip(it), quality },
+          { startMs, durationMs: effClip(it), quality, optimize },
           (done, total) => setProgress(`clip · frame ${done}/${total}`),
         );
         setProgress(null);
@@ -274,34 +290,42 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
 
         {cur.video ? (
           <View style={st.clip}>
-            <Text style={st.clipLabel}>
-              Clip · {(startMs / 1000).toFixed(1)}s – {((startMs + effClip(cur)) / 1000).toFixed(1)}s
-              {'   '}of {(cur.video.durationMs / 1000).toFixed(1)}s
-            </Text>
+            {/* One row: what you're taking, and how much of it. */}
+            <View style={st.clipHead}>
+              <Text style={st.clipRange}>
+                {(startMs / 1000).toFixed(1)}–{((startMs + effClip(cur)) / 1000).toFixed(1)}s
+              </Text>
+              <View style={st.lengths}>
+                {[1000, 2000, 3000].map((ms) => {
+                  const on = clipMs === ms;
+                  const can = cur.video!.durationMs >= ms;
+                  return (
+                    <Pressable key={ms} onPress={() => can && setClipMs(ms)} disabled={!can}
+                      style={[st.length, on && st.lengthOn]}>
+                      <Text style={[st.lengthTxt, on && st.lengthTxtOn, !can && { opacity: 0.3 }]}>
+                        {ms / 1000}s
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
             <Slider
               value={startMs}
               min={0}
               max={Math.max(1, cur.video.durationMs - effClip(cur))}
               onChange={(v) => { setStartMs(v); schedulePoster(cur, v); }}
             />
-            <View style={st.row}>
-              {[1000, 2000, 3000].map((ms) => (
-                <Pressable key={ms} onPress={() => setClipMs(ms)}
-                  style={[st.chip, clipMs === ms && st.chipOn]}
-                  disabled={cur.video!.durationMs < ms}>
-                  <Text style={[st.chipTxt, clipMs === ms && st.chipTxtOn,
-                    cur.video!.durationMs < ms && { opacity: 0.35 }]}>{ms / 1000}s</Text>
-                </Pressable>
-              ))}
-            </View>
-            <View style={st.row}>
-              {(Object.keys(QUALITY) as QualityKey[]).map((k) => (
-                <Pressable key={k} onPress={() => setQuality(k)}
-                  style={[st.chip, quality === k && st.chipOn]}>
-                  <Text style={[st.chipTxt, quality === k && st.chipTxtOn]}>{QUALITY[k].label}</Text>
-                </Pressable>
-              ))}
-            </View>
+
+            {/* The technical choices live one tap away, in a native sheet — the
+                same place every other choice in this app lives. */}
+            <Pressable onPress={clipOptions} style={st.optionsRow}>
+              <Text style={st.optionsTxt}>
+                {QUALITY[quality].label}{optimize ? ' · smaller file' : ''}
+              </Text>
+              <Ionicons name="chevron-forward" size={15} color={C.muted} />
+            </Pressable>
           </View>
         ) : null}
 
@@ -321,16 +345,23 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
 }
 
 const st = StyleSheet.create({
-  clip: { paddingHorizontal: EDGE, marginTop: 16, gap: 10 },
-  clipLabel: { color: C.muted, fontSize: 13, fontWeight: '500' },
-  row: { flexDirection: 'row', gap: 8 },
-  chip: {
-    flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center',
-    backgroundColor: C.surface2, borderWidth: StyleSheet.hairlineWidth, borderColor: C.line,
+  clip: { paddingHorizontal: EDGE, marginTop: 18, gap: 12 },
+  clipHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  clipRange: { color: C.text, fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  // Segmented control, iOS style: one track, the selection slides inside it.
+  lengths: {
+    flexDirection: 'row', backgroundColor: C.surface2, borderRadius: 9,
+    borderCurve: 'continuous', padding: 2,
   },
-  chipOn: { backgroundColor: C.accent, borderColor: C.accent },
-  chipTxt: { color: C.text, fontSize: 13, fontWeight: '600' },
-  chipTxtOn: { color: C.ink },
+  length: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 7, borderCurve: 'continuous' },
+  lengthOn: { backgroundColor: C.accent },
+  lengthTxt: { color: C.text, fontSize: 13, fontWeight: '600' },
+  lengthTxtOn: { color: C.ink },
+  optionsRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  optionsTxt: { color: C.muted, fontSize: 14, fontWeight: '500' },
   splitNote: {
     color: C.accent2, fontSize: 12, fontWeight: '600',
     paddingHorizontal: EDGE, marginTop: 14, textAlign: 'center',

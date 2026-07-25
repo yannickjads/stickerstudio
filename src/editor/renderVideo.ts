@@ -28,7 +28,7 @@ export type VideoCrop = Rect & { videoW: number; videoH: number };
 export async function renderVideoSticker(
   uri: string,
   crop: VideoCrop,
-  opts: { startMs: number; durationMs: number; quality: QualityKey },
+  opts: { startMs: number; durationMs: number; quality: QualityKey; optimize?: boolean },
   onProgress?: (done: number, total: number) => void,
 ): Promise<string> {
   const { fps, colors } = QUALITY[opts.quality];
@@ -73,10 +73,11 @@ export async function renderVideoSticker(
       if (px) samples.push(px);
       await new Promise((r) => setTimeout(r, 0));
     }
-    const palette = buildPalette(samples, colors, true);
+    const optimize = opts.optimize !== false;
+    const palette = buildPalette(samples, colors, optimize);
 
     // Pass 2 — encode, writing only what changed from frame to frame.
-    const enc = createGifEncoder(S, S, { colors, palette, optimize: true });
+    const enc = createGifEncoder(S, S, { colors, palette, optimize });
     for (let i = 0; i < frames.length; i++) {
       const px = await renderFrame(frames[i]);
       if (px) { enc.addFrame(px, delay); written++; }
