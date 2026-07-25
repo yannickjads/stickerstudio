@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Sticker Studio</title>
+<style>
+  :root {
+    --bg:#0f1117; --card:#171a24; --line:#282d3c; --text:#e7e9f0; --muted:#98a0b3;
+    --accent:#22d3ee; --ink:#06121a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#eef1f7; --card:#fff; --line:#dfe3ee; --text:#171a23; --muted:#5b6273;
+            --accent:#0b93ad; --ink:#fff; }
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:28px 18px;
+  }
+  main { width:100%; max-width:420px; text-align:center; }
+  .icon {
+    width:110px; height:110px; border-radius:24.6%; margin:0 auto 20px; display:block;
+    box-shadow:0 12px 32px -10px rgba(0,0,0,.5);
+  }
+  h1 { font-size:26px; letter-spacing:-.02em; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 26px; font-size:15px; }
+  .btn {
+    display:block; background:var(--accent); color:var(--ink); text-decoration:none;
+    font-size:17px; font-weight:600; padding:16px; border-radius:14px;
+    border-curve:continuous; transition:opacity .15s;
+  }
+  .btn:active { opacity:.7; }
+  .btn[aria-disabled="true"] { opacity:.4; pointer-events:none; }
+  .meta {
+    margin-top:18px; background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:14px 16px; font-size:13.5px; color:var(--muted);
+    text-align:left; display:grid; gap:6px;
+  }
+  .meta b { color:var(--text); font-weight:600; }
+  .row { display:flex; justify-content:space-between; gap:12px; }
+  .note { margin-top:18px; font-size:13px; color:var(--muted); line-height:1.55; }
+  .err { color:#f87171; }
+</style>
+</head>
+<body>
+<main>
+  <img class="icon" src="icon.png" alt="">
+  <h1>Sticker Studio</h1>
+  <p class="sub">Install the latest build on your iPhone</p>
+
+  <a id="install" class="btn" aria-disabled="true" href="#">Loading…</a>
+
+  <div class="meta" id="meta">
+    <div class="row"><span>Version</span><b id="v">—</b></div>
+    <div class="row"><span>Built</span><b id="d">—</b></div>
+    <div class="row"><span>Size</span><b id="s">—</b></div>
+  </div>
+
+  <p class="note">
+    Open this page in <b>Safari on the iPhone</b> and tap Install — iOS will ask to
+    confirm, then the app appears on your home screen. Installing over an existing
+    copy keeps all your packs.
+  </p>
+</main>
+
+<script>
+const REPO = 'yannickjads/stickerstudio';
+const el = (id) => document.getElementById(id);
+
+(async () => {
+  const btn = el('install');
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+    if (!r.ok) throw new Error(`GitHub said ${r.status}`);
+    const rel = await r.json();
+    const manifest = (rel.assets || []).find((a) => a.name === 'manifest.plist');
+    const ipa = (rel.assets || []).find((a) => a.name.endsWith('.ipa'));
+    if (!manifest) throw new Error('No manifest in the latest release');
+
+    // iOS installs over-the-air from a plist describing the .ipa.
+    btn.href = 'itms-services://?action=download-manifest&url=' +
+      encodeURIComponent(manifest.browser_download_url);
+    btn.textContent = 'Install';
+    btn.setAttribute('aria-disabled', 'false');
+
+    el('v').textContent = rel.tag_name.replace(/^ios-/, '');
+    el('d').textContent = new Date(rel.published_at).toLocaleString(undefined,
+      { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+    el('s').textContent = ipa ? (ipa.size / 1048576).toFixed(1) + ' MB' : '—';
+  } catch (e) {
+    btn.textContent = 'Could not load the latest build';
+    btn.classList.add('err');
+    el('meta').innerHTML = '<span class="err">' + e.message + '</span>';
+  }
+})();
+</script>
+</body>
+</html>
