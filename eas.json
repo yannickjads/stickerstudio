@@ -1,0 +1,34 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "credentialsSource": "local",
+      "ios": {
+        "simulator": false
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "credentialsSource": "local",
+      "ios": {
+        "simulator": false
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "credentialsSource": "local"
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "bundleIdentifier": "com.yannick.stickerstudio"
+      }
+    }
+  }
+}

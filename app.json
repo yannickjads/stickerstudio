@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Sticker Studio",
+    "slug": "StickerStudio",
+    "owner": "yannickleroy",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0f1117",
+    "ios": {
+      "bundleIdentifier": "com.yannick.stickerstudio",
+      "supportsTablet": true,
+      "infoPlist": {
+        "CFBundleDisplayName": "Sticker Studio",
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["whatsapp"],
+        "NSPhotoLibraryUsageDescription": "Sticker Studio needs access to your photos so you can turn them into stickers.",
+        "NSPhotoLibraryAddUsageDescription": "Sticker Studio saves your finished stickers to your Photos."
+      }
+    },
+    "android": {
+      "package": "com.yannick.stickerstudio",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f1117",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Sticker Studio needs access to your photos so you can turn them into stickers."
+        }
+      ],
+      "expo-sqlite",
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2ebb26b2-95ca-4ff7-bb80-362b38a66541"
+      }
+    }
+  }
+}
