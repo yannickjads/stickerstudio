@@ -40,10 +40,30 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
 
+      # Every build needs its own build number: iOS will not replace an installed
+      # app that reports the same version AND build, so without this each new
+      # release silently no-ops on the device.
+      - name: Stamp build number
+        run: |
+          node -e "
+            const fs = require('fs');
+            const cfg = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+            cfg.expo.ios = cfg.expo.ios || {};
+            cfg.expo.ios.buildNumber = String(process.env.GITHUB_RUN_NUMBER);
+            fs.writeFileSync('app.json', JSON.stringify(cfg, null, 2) + '\n');
+            console.log('buildNumber =', cfg.expo.ios.buildNumber);
+          "
+
       # Generate the native iOS project from the Expo config (we don't keep ios/
       # in the repo — it's derived, exactly like EAS does it).
       - name: Prebuild
         run: npx expo prebuild --platform ios --no-install
+
+      - name: Verify build number reached the app
+        run: |
+          PLIST=$(ls ios/*/Info.plist | head -1)
+          echo "CFBundleVersion: $(plutil -extract CFBundleVersion raw "$PLIST")"
+          echo "CFBundleShortVersionString: $(plutil -extract CFBundleShortVersionString raw "$PLIST")"
 
       - name: Install CocoaPods
         run: |
@@ -128,7 +148,8 @@ jobs:
           IPA=$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)
           cp "$IPA" dist/StickerStudio.ipa
           VERSION=$(node -p "require('./app.json').expo.version")
-          TAG="ios-${VERSION}-${GITHUB_RUN_NUMBER}"
+          BUILD=$(node -p "require('./app.json').expo.ios.buildNumber")
+          TAG="ios-${VERSION}-${BUILD}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           # Over-the-air install manifest (itms-services) so the iPhone can install
@@ -143,7 +164,7 @@ jobs:
             </dict></array>
             <key>metadata</key><dict>
               <key>bundle-identifier</key><string>${BUNDLE_ID}</string>
-              <key>bundle-version</key><string>${VERSION}</string>
+              <key>bundle-version</key><string>${BUILD}</string>
               <key>kind</key><string>software</string>
               <key>title</key><string>Sticker Studio</string>
             </dict>

@@ -12,6 +12,7 @@ import { listPacks, createPack, updatePack, duplicatePack, deletePack } from '..
 import { nativePrompt } from '../../modules/native-prompt';
 import { exportAllPacks, importPacksFromZip } from '../backup';
 import { importWastickers, isWastickersFile } from '../wastickers';
+import appConfig from '../../app.json';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 
@@ -100,7 +101,10 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   };
 
   const appMenu = () => {
-    Alert.alert('Sticker Studio', undefined, [
+    // Version + build shown here so it's always obvious which build is installed.
+    const v = appConfig.expo.version;
+    const b = (appConfig.expo.ios as { buildNumber?: string }).buildNumber ?? 'dev';
+    Alert.alert('Sticker Studio', `Version ${v} (${b})`, [
       { text: 'Back up all packs (.zip)', onPress: backUpAll },
       { text: 'Import pack or backup…', onPress: restore },
       { text: 'Cancel', style: 'cancel' },
