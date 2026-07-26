@@ -176,10 +176,33 @@ jobs:
           echo "$ASC_API_KEY_BASE64" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
           IPA=$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)
-          xcrun altool --validate-app -f "$IPA" -t ios \
-            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
-          xcrun altool --upload-app -f "$IPA" -t ios \
-            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+          # Apple's own API falls over from time to time — a run failed with six
+          # consecutive 500s from list-apps, which altool then reports as the
+          # useless "Cannot determine the Apple ID from Bundle ID". Nothing about
+          # the build was wrong, so retry rather than fail.
+          ok=0
+          for attempt in 1 2 3; do
+            echo "--- upload attempt $attempt"
+            if OUT=$(xcrun altool --upload-app -f "$IPA" -t ios \
+                      --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1); then
+              echo "$OUT"; ok=1; break
+            fi
+            echo "$OUT"
+            # A build number Apple has already accepted is a success, not a retry:
+            # trying again would only ever produce the same rejection.
+            if echo "$OUT" | grep -qiE "already.*(used|exist)|redundant binary"; then
+              echo "Apple already has this build."; ok=1; break
+            fi
+            # Anything that is plainly about THIS binary will not fix itself.
+            if echo "$OUT" | grep -qiE "Validation failed|Invalid|ITMS-"; then
+              echo "::error::The binary itself was rejected — retrying would not help."
+              break
+            fi
+            [ "$attempt" -lt 3 ] && { echo "transient; waiting 90s"; sleep 90; }
+          done
+
           rm -f ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          [ "$ok" = 1 ] || exit 1
           echo "Uploaded. Apple processes the build for a few minutes before it"
           echo "appears in TestFlight."
