@@ -4,8 +4,10 @@
 
 const IMAGE = /\.(webp|png|gif|jpe?g)$/i;
 const WEBP = /\.webp$/i;
-// The tray icon is a pack's thumbnail, not one of its stickers.
-const TRAY_NAME = /(^|\/)(tray|cover|icon|thumb\w*)[^/]*$/i;
+// The tray icon is a pack's thumbnail, not one of its stickers. Matched as a
+// whole stem rather than a prefix: "icon.png" is a tray, "icon-of-my-cat.webp"
+// is a sticker somebody named, and dropping it would lose their work.
+const TRAY_NAME = /(^|\/)(tray|cover|icon|thumb|thumbnail)\.[^./]+$/i;
 // Zips made on a Mac carry a shadow copy of every file, and dotfiles generally;
 // importing those would double the pack and fill half of it with garbage.
 const JUNK = /(^|\/)(__MACOSX\/|\.)/;

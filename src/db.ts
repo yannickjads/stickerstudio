@@ -3,6 +3,7 @@ import * as SQLite from 'expo-sqlite';
 import type { Pack, Sticker, Asset, EditorDocument } from './types';
 import { PACK_MAX } from './types';
 import { newId, saveRender, saveAsset, deleteRender, deleteFile, toAbs, toRel } from './storage';
+import { firstEmoji } from './emoji';
 
 const SCHEMA_VERSION = 7;
 
@@ -170,7 +171,7 @@ export async function createPack(name: string, author = ''): Promise<Pack> {
 export async function setStickerEmoji(stickerId: string, emoji: string): Promise<void> {
   const d = await db();
   await d.runAsync(`UPDATE stickers SET emoji=?, updatedAt=? WHERE id=?`,
-    [Array.from(emoji.trim())[0] ?? '', Date.now(), stickerId]);
+    [firstEmoji(emoji), Date.now(), stickerId]);
 }
 
 // The pack's tray/cover icon. Set once, reused by the pack grid, WhatsApp's tray,

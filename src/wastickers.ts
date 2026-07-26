@@ -9,7 +9,8 @@ import { PACK_MAX } from './types';
 import { addSticker, createPack, ensurePackSlots, deletePack, setPackTrayImage } from './db';
 import { writeExport, writeTempBytes, deleteFile } from './storage';
 import {
-  staticWebpBase64, animatedWebpBase64, trayPngBase64, isAnimatedSticker,
+  staticWebpBase64, animatedWebpBase64, stillAsAnimatedWebpBase64, trayPngBase64,
+  isAnimatedSticker, clamp128,
 } from './editor/whatsappExport';
 import { base64ToBytes } from './editor/webpMux';
 import { imageKind, isAnimatedBytes, extensionFor } from './editor/imageKind';
@@ -25,16 +26,22 @@ export async function exportWastickers(
 ): Promise<string> {
   if (!stickers.length) throw new Error('This pack has no stickers yet.');
   const zip = new JSZip();
-  zip.file('title.txt', (pack.name || 'Stickers').slice(0, 128));
-  zip.file('author.txt', (pack.author || 'Sticker Studio').slice(0, 128));
+  zip.file('title.txt', clamp128(pack.name || 'Stickers'));
+  zip.file('author.txt', clamp128(pack.author || 'Sticker Studio'));
   zip.file('cover.png', base64ToBytes(await trayPngBase64(coverUri || stickers[0].uri)));
 
+  // Animation is a property of the PACK, not of a sticker: a pack may not mix the
+  // two. Decided once, exactly as the WhatsApp hand-off does it — still stickers
+  // in an animated pack go out as two identical frames, so they simply don't move.
   const list = stickers.slice(0, PACK_MAX);
+  const animated = list.some(isAnimatedSticker);
   for (let i = 0; i < list.length; i++) {
     const s = list[i];
-    const b64 = isAnimatedSticker(s)
-      ? await animatedWebpBase64(s.uri)
-      : await staticWebpBase64(s.uri);
+    const b64 = !animated
+      ? await staticWebpBase64(s.uri)
+      : isAnimatedSticker(s)
+        ? await animatedWebpBase64(s.uri)
+        : await stillAsAnimatedWebpBase64(s.uri);
     zip.file(`sticker-${String(i + 1).padStart(2, '0')}.webp`, base64ToBytes(b64));
     onProgress?.(i + 1, list.length);
   }
@@ -59,9 +66,14 @@ export async function importWastickers(
 ): Promise<WaImportResult> {
   const zip = await JSZip.loadAsync(await new File(uri).bytes());
 
+  // Matched by basename, case-insensitively — the sticker reader already tolerates
+  // an archive that nests everything in a folder, and the pack's name and author
+  // should not be the one thing that quietly comes back empty when it does.
   const read = async (name: string) => {
-    const f = zip.file(name);
-    return f ? (await f.async('string')).trim() : '';
+    const key = Object.keys(zip.files).find(
+      (n) => !zip.files[n].dir && n.replace(/^.*\//, '').toLowerCase() === name,
+    );
+    return key ? (await zip.files[key].async('string')).trim() : '';
   };
   const entries = entriesOf(zip);
   if (!entries.length) throw new Error('That file does not contain any stickers.');

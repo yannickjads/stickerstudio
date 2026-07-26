@@ -5,7 +5,8 @@
 import { Skia, ImageFormat, type SkImage } from '@shopify/react-native-skia';
 import type { Pack, Sticker } from '../types';
 import { loadSkImage } from './renderCrop';
-import { muxAnimatedWebp, base64ToBytes, bytesToBase64, type WebpFrame } from './webpMux';
+import { fitSize } from './geometry';
+import { muxAnimatedWebp, base64ToBytes, bytesToBase64, frameDurationMs, type WebpFrame } from './webpMux';
 import { MAX_ANIM_MS } from './renderAnimated';
 
 const STATIC_LIMIT = 100 * 1024;
@@ -21,8 +22,43 @@ export function isAnimatedSticker(s: Sticker): boolean {
 
 const b64Bytes = (b64: string) => Math.floor(b64.length * 3 / 4);
 
+// 128 characters, counted as characters. String.slice counts UTF-16 units and
+// will happily cut a surrogate pair in half, which turns the last emoji of a pack
+// name into a replacement character.
+export const clamp128 = (s: string) => Array.from(s).slice(0, 128).join('');
+
+/**
+ * Exactly 512×512 — the spec says "exactly", not "at most".
+ *
+ * Stickers made in this app already are, but one imported from another pack is
+ * stored byte-for-byte at whatever size it arrived, and an animated source is
+ * decoded at its own size too. Encoding those unchanged produced stickers
+ * WhatsApp rejects, and — worse — animated ones whose frames disagreed with the
+ * 512×512 canvas the muxer writes around them.
+ *
+ * Returns the image untouched when it is already the right size, so the common
+ * case allocates nothing; callers dispose the result only when it differs.
+ */
+function to512(img: SkImage): SkImage {
+  if (img.width() === SIZE && img.height() === SIZE) return img;
+  const surface = Skia.Surface.Make(SIZE, SIZE);
+  if (!surface) throw new Error('Could not render the sticker.');
+  const { dw, dh } = fitSize(img.width(), img.height(), SIZE, SIZE, 'contain');
+  surface.getCanvas().drawImageRect(
+    img,
+    Skia.XYWHRect(0, 0, img.width(), img.height()),
+    Skia.XYWHRect((SIZE - dw) / 2, (SIZE - dh) / 2, dw, dh),
+    Skia.Paint(),
+  );
+  const snap = surface.makeImageSnapshot();
+  surface.dispose();
+  return snap;
+}
+
 export async function staticWebpBase64(uri: string): Promise<string> {
-  const img = await loadSkImage(uri);
+  const decoded = await loadSkImage(uri);
+  const img = to512(decoded);
+  if (img !== decoded) decoded.dispose();
   for (const q of [90, 75, 55, 35]) {
     const b64 = img.encodeToBase64(ImageFormat.WEBP, q);
     if (!b64 || b64.length < 8) throw new Error('WebP encoding is not available.');
@@ -34,8 +70,10 @@ export async function staticWebpBase64(uri: string): Promise<string> {
 // A still sticker inside an ANIMATED pack: WhatsApp requires every sticker in an
 // animated pack to be animated, so wrap the image as two identical frames (the
 // standard trick — it simply doesn't move).
-async function stillAsAnimatedWebpBase64(uri: string): Promise<string> {
-  const img = await loadSkImage(uri);
+export async function stillAsAnimatedWebpBase64(uri: string): Promise<string> {
+  const decoded = await loadSkImage(uri);
+  const img = to512(decoded);
+  if (img !== decoded) decoded.dispose();
   for (const q of [80, 60, 45, 30]) {
     const b64 = img.encodeToBase64(ImageFormat.WEBP, q);
     if (!b64 || b64.length < 8) throw new Error('WebP encoding is not available.');
@@ -62,8 +100,15 @@ export async function animatedWebpBase64(uri: string): Promise<string> {
     for (let i = 0; i < total; i++) {
       const d = anim.currentFrameDuration();
       if (d < 0) break;
-      const img = anim.getCurrentFrame();
-      if (img) frames.push({ img, delayMs: d });
+      const frame = anim.getCurrentFrame();
+      if (frame) {
+        // Normalised here, once: the muxer writes a 512×512 canvas header, so a
+        // frame of any other size would be composited against a canvas it does
+        // not fill.
+        const img = to512(frame);
+        if (img !== frame) frame.dispose();
+        frames.push({ img, delayMs: d });
+      }
       if (i < total - 1 && anim.decodeNextFrame() < 0) break;
       if (i % 4 === 3) await new Promise((r) => setTimeout(r, 0));
     }
@@ -71,12 +116,22 @@ export async function animatedWebpBase64(uri: string): Promise<string> {
     // Ten seconds is WhatsApp's ceiling. Our own renders already respect it, but a
     // sticker imported from another app's pack is stored byte-for-byte and can be
     // any length, so trim here too rather than hand over something it will refuse.
+    //
+    // Counted in the durations the MUXER will write, not the ones we were handed:
+    // it floors every frame at 20ms, so an animation of 5ms frames measures as a
+    // quarter of its real length and would sail past the limit.
     let ms = 0, keep = 0;
-    while (keep < frames.length && ms + frames[keep].delayMs <= MAX_ANIM_MS) {
-      ms += frames[keep].delayMs;
+    while (keep < frames.length && ms + frameDurationMs(frames[keep].delayMs) <= MAX_ANIM_MS) {
+      ms += frameDurationMs(frames[keep].delayMs);
       keep++;
     }
-    if (keep >= 2 && keep < frames.length) {
+    // Two frames is the minimum that still counts as animated; if even those two
+    // exceed the ceiling the delays are absurd, so cap them instead of giving up.
+    if (keep < 2) {
+      for (let i = 2; i < frames.length; i++) frames[i].img.dispose();
+      frames.length = Math.min(2, frames.length);
+      for (const f of frames) f.delayMs = Math.floor(MAX_ANIM_MS / frames.length);
+    } else if (keep < frames.length) {
       for (let i = keep; i < frames.length; i++) frames[i].img.dispose();
       frames.length = keep;
     }
@@ -142,8 +197,8 @@ export async function buildWhatsAppPayload(
   }
   const payload = {
     identifier: `${pack.id}-${animated ? 'anim' : 'still'}`,
-    name: pack.name.slice(0, 128),
-    publisher: (pack.author || 'Sticker Studio').slice(0, 128),
+    name: clamp128(pack.name),
+    publisher: clamp128(pack.author || 'Sticker Studio'),
     tray_image: await trayPngBase64(trayUri || stickers[0].uri),
     animated_sticker_pack: animated,
     ios_app_store_link: '',

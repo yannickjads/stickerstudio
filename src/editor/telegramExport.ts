@@ -10,6 +10,7 @@ import type { Pack, Sticker } from '../types';
 import { loadSkImage } from './renderCrop';
 import { bytesToBase64 } from './webpMux';
 import { isAnimatedSticker } from './whatsappExport';
+import { imageKind } from './imageKind';
 
 const SIZE = 512;
 const STATIC_LIMIT = 512 * 1024;
@@ -20,9 +21,11 @@ export const TG_DEFAULT_EMOJI = '😀';
 // device — so an animated sticker is sent as a still of its first frame.
 async function stickerPngBase64(s: Sticker): Promise<string> {
   if (!isAnimatedSticker(s)) {
-    const f = new File(s.uri);
-    const bytes = await f.bytes();
-    if (bytes.length <= STATIC_LIMIT) return bytesToBase64(bytes); // already a 512 PNG
+    const bytes = await new File(s.uri).bytes();
+    // Only skip the re-encode when the file really IS a PNG. An imported sticker
+    // is stored exactly as it arrived, which is usually WebP — sending those bytes
+    // under a PNG label is a lie Telegram has every right to reject.
+    if (imageKind(bytes) === 'png' && bytes.length <= STATIC_LIMIT) return bytesToBase64(bytes);
   }
   // Re-encode: first frame of a GIF, or a too-large PNG shrunk by re-encoding.
   const img = await loadSkImage(s.uri);

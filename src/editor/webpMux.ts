@@ -6,6 +6,18 @@
 
 export type WebpFrame = { webp: Uint8Array; delayMs: number };
 
+/**
+ * What this muxer will actually write for a frame. WhatsApp's floor is 8 ms, but
+ * a GIF stores delays in centiseconds and 0 is common, which every decoder in
+ * practice plays back at about 100 ms — 20 is the usual compromise and matches
+ * what browsers do.
+ *
+ * Exported because a caller trimming an animation to a duration limit has to
+ * count the durations that get WRITTEN, not the ones it started with: raw delays
+ * of 5 ms look like a 500 ms clip and come out four times longer.
+ */
+export const frameDurationMs = (delayMs: number) => Math.max(20, Math.round(delayMs));
+
 const te = new TextEncoder();
 
 function fourcc(s: string): Uint8Array { return te.encode(s); }
@@ -92,7 +104,7 @@ export function muxAnimatedWebp(frames: WebpFrame[], width: number, height: numb
     head.set(u24(0), 3);                    // frame y / 2
     head.set(u24(width - 1), 6);
     head.set(u24(height - 1), 9);
-    head.set(u24(Math.max(20, Math.round(f.delayMs))), 12);
+    head.set(u24(frameDurationMs(f.delayMs)), 12);
     head[15] = 0b00000011;                  // no-blend + dispose-to-background
     const size = 16 + image.length;
     parts.push(fourcc('ANMF'), u32(size), head, image);
