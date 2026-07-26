@@ -11,6 +11,8 @@ import type { Route, Nav } from './src/nav';
 import PacksScreen from './src/screens/PacksScreen';
 import PackScreen from './src/screens/PackScreen';
 import CropScreen from './src/screens/CropScreen';
+import StickerScreen from './src/screens/StickerScreen';
+import CutoutScreen from './src/screens/CutoutScreen';
 import EditorScreen from './src/screens/EditorScreen';
 
 export default function App() {
@@ -71,7 +73,12 @@ export default function App() {
           ) : route.name === 'pack' ? (
             <PackScreen nav={nav} packId={route.packId} packName={route.packName} />
           ) : route.name === 'crop' ? (
-            <CropScreen nav={nav} packId={route.packId} packName={route.packName} startSlot={route.startSlot} />
+            <CropScreen nav={nav} packId={route.packId} packName={route.packName}
+              startSlot={route.startSlot} editStickerId={route.editStickerId} />
+          ) : route.name === 'sticker' ? (
+            <StickerScreen nav={nav} stickerId={route.stickerId} packId={route.packId} packName={route.packName} />
+          ) : route.name === 'cutout' ? (
+            <CutoutScreen nav={nav} uri={route.uri} title={route.title} onDone={route.onDone} />
           ) : (
             <EditorScreen nav={nav} stickerId={route.stickerId} packName={route.packName} />
           )}

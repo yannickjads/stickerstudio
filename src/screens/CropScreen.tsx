@@ -12,14 +12,15 @@ import type { EditorDocument } from '../types';
 import { DOC_SCHEMA_VERSION, PACK_MAX } from '../types';
 import {
   addSticker, createAsset, createDocument, createPack, getPack, deleteDocumentAndAssets,
-  deleteAssetById, ensurePackSlots, freeSlots,
+  deleteAssetById, ensurePackSlots, freeSlots, getSticker, getDocument, getAsset,
+  updateStickerImage, updateDocument,
 } from '../db';
 import { deleteRender, deleteFile, newId } from '../storage';
-import { renderCroppedPng, ensureDecodableUri, STICKER_SIZE } from '../editor/renderCrop';
+import { renderCroppedPng, ensureDecodableUri, loadSkImage, STICKER_SIZE } from '../editor/renderCrop';
 import { renderCroppedGif, maybeAnimatedSource } from '../editor/renderAnimated';
 import { renderVideoSticker, QUALITY, MAX_CLIP_MS, type QualityKey } from '../editor/renderVideo';
 import { videoInfo, extractFrames } from '../../modules/video-frames';
-import { cutoutSubject, cutoutSupported } from '../../modules/subject-cutout';
+import { cutoutSupported } from '../../modules/subject-cutout';
 import Cropper from '../SquareCropper';
 import { Slider } from '../editor/controls';
 
@@ -27,12 +28,13 @@ type Item = {
   id: string; uri: string; w: number; h: number; maybeAnimated: boolean;
   video?: { durationMs: number };  // set for clips
   poster?: string;                 // still frame shown in the cropper
+  cut?: boolean;                   // its background has already been removed
 };
 const { width: SCREEN_W } = Dimensions.get('window');
 const BOX = Math.min(SCREEN_W - 44, 380);
 const EDGE = (SCREEN_W - BOX) / 2; // everything aligns to the crop box edges
 
-export default function CropScreen({ nav, packId, packName, startSlot }: { nav: Nav; packId: string; packName: string; startSlot?: number }) {
+export default function CropScreen({ nav, packId, packName, startSlot, editStickerId }: { nav: Nav; packId: string; packName: string; startSlot?: number; editStickerId?: string }) {
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<Item[] | null>(null);
   const [index, setIndex] = useState(0);
@@ -43,10 +45,13 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   const [clipMs, setClipMs] = useState(MAX_CLIP_MS); // clip length
   const [quality, setQuality] = useState<QualityKey>('balanced');
   const [optimize, setOptimize] = useState(true);
-  const [cutout, setCutout] = useState(false);
   const [canCutout, setCanCutout] = useState(false);
   useEffect(() => { cutoutSupported().then(setCanCutout); }, []);
   const launched = useRef(false);
+  // Re-cropping an existing sticker: same screen, same maths, but it replaces one
+  // sticker instead of filling slots.
+  const editing = !!editStickerId;
+  const editDocRef = useRef<{ docId: string; layerId: string } | null>(null);
 
   // Save target: a queue of free slots starting at startSlot (wrapping around to
   // earlier gaps); when it runs dry, auto-creates "<name> 2", "<name> 3", ...
@@ -60,6 +65,7 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   const resetTransform = () => { tx.value = 0; ty.value = 0; scale.value = 1; };
 
   useEffect(() => {
+    if (editing) return;
     (async () => {
       await ensurePackSlots(packId);
       const [p, free] = await Promise.all([getPack(packId), freeSlots(packId)]);
@@ -69,10 +75,33 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
       baseRef.current = { name: p?.name ?? packName, author: p?.author ?? '', seq: 2 };
       setRemaining(queue.length);
     })();
-  }, [packId, packName, startSlot]);
+  }, [packId, packName, startSlot, editing]);
+
+  // Re-crop: the stored original, not the 512px render, so a second crop is as
+  // sharp as the first.
+  useEffect(() => {
+    if (!editStickerId || launched.current) return;
+    launched.current = true;
+    (async () => {
+      try {
+        const s = await getSticker(editStickerId);
+        const doc = s?.documentId ? await getDocument(s.documentId) : null;
+        const layer = doc?.layers.find((l) => l.type === 'image' && 'assetId' in l && l.assetId);
+        const asset = layer && 'assetId' in layer && layer.assetId ? await getAsset(layer.assetId) : null;
+        if (!s || !doc || !layer || !asset) throw new Error('The original image for this sticker is gone.');
+        editDocRef.current = { docId: doc.id, layerId: layer.id };
+        setItems([{
+          id: s.id, uri: asset.localUri, w: asset.width, h: asset.height,
+          maybeAnimated: maybeAnimatedSource(asset.localUri, null),
+        }]);
+      } catch (e: any) {
+        Alert.alert('Cannot crop again', String(e?.message || e), [{ text: 'OK', onPress: nav.pop }]);
+      }
+    })();
+  }, [editStickerId, nav]);
 
   useEffect(() => {
-    if (launched.current) return;
+    if (editing || launched.current) return;
     launched.current = true;
     (async () => {
       const res = await ImagePicker.launchImageLibraryAsync({
@@ -111,22 +140,6 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   const posterTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (posterTimer.current) clearTimeout(posterTimer.current); }, []);
 
-  // Preview the cut-out in the cropper, so you frame what you'll actually get.
-  const previewSeq = useRef(0);
-  useEffect(() => {
-    if (!items) return;
-    const it = items[index];
-    if (!cutout || it.video) return;
-    const seq = ++previewSeq.current;
-    let alive = true;
-    (async () => {
-      const cut = await cutoutSubject(it.uri);
-      if (!alive || seq !== previewSeq.current || !cut) return;
-      setItems((prev) => prev && prev.map((x) => (x.id === it.id ? { ...x, poster: cut } : x)));
-    })();
-    return () => { alive = false; };
-  }, [cutout, index, items?.length]);
-
   const schedulePoster = (it: Item, atMs: number) => {
     if (!it.video) return;
     if (posterTimer.current) clearTimeout(posterTimer.current);
@@ -144,11 +157,71 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
 
   const tick = (on: boolean, label: string) => (on ? `✓  ${label}` : label);
 
-  const stickerOptions = (isVideo: boolean) => {
+  // Hand the framed crop to the background editor and take its answer back as the
+  // item's new source: already square, already cropped, so everything downstream
+  // carries on unchanged.
+  const openCutout = (it: Item) => {
+    if (busy) return;
+    const go = async () => {
+      setBusy(true);
+      setProgress('preparing');
+      let temp: string | null = null;
+      try {
+        const base = it.video ? (it.poster ?? it.uri) : await ensureDecodableUri(it.uri);
+        if (base !== it.uri && base !== it.poster) { temp = base; }
+        // The crop rect is measured against the item's own dimensions, but a clip's
+        // poster frame comes out of extraction downscaled — so measure what we
+        // actually have and scale the rect onto it.
+        const probe = await loadSkImage(base);
+        const probeW = probe.width();
+        const s = probeW / it.w;
+        probe.dispose();
+        const c = cropRect(it, false);
+        let crop = c;
+        if (s !== 1) {
+          const pw = probeW, ph = Math.round(it.h * s);
+          const side = Math.max(1, Math.min(Math.round(c.width * s), pw, ph));
+          crop = {
+            x: Math.min(Math.round(c.x * s), pw - side),   // rounding must not
+            y: Math.min(Math.round(c.y * s), ph - side),   // push the rect off the frame
+            width: side, height: side,
+          };
+        }
+        const png = await renderCroppedPng(base, crop);
+        nav.push({
+          name: 'cutout',
+          uri: png,
+          onDone: (file) => {
+            setItems((prev) => prev && prev.map((x) => (x.id === it.id
+              ? { id: x.id, uri: file, w: STICKER_SIZE, h: STICKER_SIZE, maybeAnimated: false, cut: true }
+              : x)));
+            resetTransform();
+            deleteFile(png); // the un-cut crop it was made from
+          },
+        });
+      } catch (e: any) {
+        Alert.alert('Could not open the background editor', String(e?.message || e));
+      } finally {
+        if (temp) await deleteFile(temp);
+        setBusy(false);
+        setProgress(null);
+      }
+    };
+    // Only the first frame survives a cut-out, so say so before doing it.
+    if (it.video || it.maybeAnimated) {
+      Alert.alert('This one moves', 'Removing the background keeps only the frame you see — the sticker becomes a still image.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Continue', onPress: go },
+      ]);
+    } else { go(); }
+  };
+
+  const stickerOptions = (it: Item) => {
+    const isVideo = !!it.video;
     Alert.alert(isVideo ? 'Clip options' : 'Sticker options', undefined, [
       ...(canCutout ? [{
-        text: tick(cutout, 'Cut out subject'),
-        onPress: () => setCutout((v) => !v),
+        text: it.cut ? 'Edit the background again' : 'Remove background…',
+        onPress: () => openCutout(it),
       }] : []),
       ...(isVideo ? (Object.keys(QUALITY) as QualityKey[]).map((k) => ({
         text: tick(quality === k, QUALITY[k].label),
@@ -163,11 +236,11 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   };
 
   // One muted line summarising whatever is switched on.
-  const optionsSummary = (isVideo: boolean) => {
+  const optionsSummary = (it: Item) => {
     const bits: string[] = [];
-    if (isVideo) bits.push(QUALITY[quality].label);
-    if (isVideo && optimize) bits.push('smaller file');
-    if (cutout) bits.push('cut out');
+    if (it.video) bits.push(QUALITY[quality].label);
+    if (it.video && optimize) bits.push('smaller file');
+    if (it.cut) bits.push('background removed');
     return bits.length ? bits.join(' · ') : 'Options';
   };
 
@@ -206,20 +279,11 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
     // Normalize once at import (iPhone HEIC etc. -> a format Skia can decode).
     // A clip keeps its poster frame as the stored source: the video itself is not
     // ours to copy into app storage.
-    let srcUri = it.video ? (it.poster ?? it.uri) : await ensureDecodableUri(it.uri);
-    // Lifting the subject happens before cropping, so the crop rect — measured
-    // against the original — still lines up.
-    let cutUri: string | null = null;
-    if (cutout && !it.video) {
-      setProgress('cutting out subject');
-      cutUri = await cutoutSubject(srcUri);
-      setProgress(null);
-      if (cutUri) srcUri = cutUri;
-    }
-    // Keep the source + an editable document behind the sticker (future editing).
+    const srcUri = it.video ? (it.poster ?? it.uri) : await ensureDecodableUri(it.uri);
+    // Keep the source + an editable document behind the sticker, so the sticker
+    // can be cropped again later from the original rather than from its render.
     const asset = await createAsset(srcUri, it.w, it.h);
-    if (srcUri !== it.uri) await deleteFile(srcUri); // transcode/cutout temp no longer needed
-    if (cutUri && cutUri !== srcUri) await deleteFile(cutUri);
+    if (srcUri !== it.uri) await deleteFile(srcUri); // transcode temp no longer needed
     const now = Date.now();
     const doc: EditorDocument = {
       id: newId(),
@@ -274,6 +338,43 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
     }
   };
 
+  // Re-crop: render the same way, then swap the sticker's image and remember the
+  // new rect on its document so a third crop starts where this one ended.
+  const reRender = async (it: Item, centered: boolean) => {
+    if (!editStickerId) return;
+    const crop = cropRect(it, centered);
+    let tmp: string | null = null;
+    if (it.maybeAnimated && !it.cut) {
+      try {
+        tmp = await renderCroppedGif(it.uri, crop, (done, total) => {
+          if (done % 5 === 0 || done === total) setProgress(`animating · frame ${done}/${total}`);
+        });
+      } catch (e) {
+        console.warn('animated re-crop failed, falling back to still:', e);
+        tmp = null;
+      }
+      setProgress(null);
+    }
+    if (!tmp) tmp = await renderCroppedPng(it.uri, crop);
+    try {
+      await updateStickerImage(editStickerId, tmp, STICKER_SIZE, STICKER_SIZE,
+        tmp.toLowerCase().endsWith('.gif'));
+      const ref = editDocRef.current;
+      if (ref) {
+        const doc = await getDocument(ref.docId);
+        if (doc) {
+          await updateDocument({
+            ...doc,
+            layers: doc.layers.map((l) => (l.id === ref.layerId ? { ...l, crop } : l)),
+            updatedAt: Date.now(),
+          });
+        }
+      }
+    } finally {
+      await deleteRender(tmp);
+    }
+  };
+
   const finish = () => {
     const splits = splitsRef.current;
     if (splits.length) {
@@ -288,6 +389,12 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
     if (!items || busy) return;
     setBusy(true);
     try {
+      if (editing) {
+        await reRender(items[index], false);
+        Haptics.selectionAsync();
+        nav.pop();
+        return;
+      }
       await renderAndStore(items[index], false);
       Haptics.selectionAsync();
       if (index < items.length - 1) { setIndex(index + 1); resetTransform(); setStartMs(0); }
@@ -300,6 +407,11 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
     if (!items || busy) return;
     setBusy(true);
     try {
+      if (editing) {
+        await reRender(items[index], true);
+        nav.pop();
+        return;
+      }
       for (let i = index; i < items.length; i++) {
         setIndex(i); // keep the "n / total" counter honest during the batch
         await renderAndStore(items[i], true);
@@ -323,12 +435,14 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
-      <Header title={`Crop for ${packName}`} onBack={busy ? undefined : nav.pop}
+      <Header title={editing ? 'Crop again' : `Crop for ${packName}`} onBack={busy ? undefined : nav.pop}
         right={<NavText label={items.length > 1 ? 'Centre all' : 'Centre'}
           onPress={autoCentreAll} disabled={busy} />} />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
         <Text style={[S.hint, { textAlign: 'center', marginBottom: 10 }]}>
-          {busy && progress ? progress : `${index + 1} / ${items.length} · drag to move · pinch to zoom`}
+          {busy && progress ? progress
+            : editing ? 'drag to move · pinch to zoom'
+            : `${index + 1} / ${items.length} · drag to move · pinch to zoom`}
         </Text>
 
         <Cropper key={`${cur.id}-${cur.poster ?? ''}`} uri={cur.poster ?? cur.uri}
@@ -371,8 +485,8 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
 
         {/* Same single line for stills and clips — one place for every choice. */}
         {canCutout || cur.video ? (
-          <Pressable onPress={() => stickerOptions(!!cur.video)} style={st.optionsRow}>
-            <Text style={st.optionsTxt}>{optionsSummary(!!cur.video)}</Text>
+          <Pressable onPress={() => stickerOptions(cur)} style={st.optionsRow} disabled={busy}>
+            <Text style={st.optionsTxt}>{optionsSummary(cur)}</Text>
             <Ionicons name="chevron-forward" size={15} color={C.muted} />
           </Pressable>
         ) : null}
@@ -384,7 +498,8 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
         ) : null}
 
         <View style={{ paddingHorizontal: EDGE, marginTop: 20, gap: 10 }}>
-          <Btn label={isLast ? 'Save & Finish' : 'Save & Next'} onPress={saveAndNext} busy={busy} />
+          <Btn label={editing ? 'Save' : isLast ? 'Save & Finish' : 'Save & Next'}
+            onPress={saveAndNext} busy={busy} />
           <Btn label="Reset" kind="ghost" onPress={resetTransform} disabled={busy} />
         </View>
       </ScrollView>

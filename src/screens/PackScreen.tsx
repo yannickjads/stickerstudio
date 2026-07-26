@@ -12,8 +12,7 @@ import type { Nav } from '../nav';
 import type { Pack, Sticker } from '../types';
 import { PACK_MAX } from '../types';
 import {
-  listStickers, deleteSticker, getPack, ensurePackSlots, updatePack, deletePack,
-  setPackCover, getPackCoverSticker, setStickerEmoji,
+  listStickers, getPack, ensurePackSlots, updatePack, deletePack, getPackCoverSticker,
 } from '../db';
 import { nativePrompt } from '../../modules/native-prompt';
 import { buildWhatsAppPayload, isAnimatedSticker, WA_MIN_STICKERS } from '../editor/whatsappExport';
@@ -59,42 +58,13 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
   }, [packId, nav]);
   useEffect(() => { load(); }, [load]);
 
-  const shareOne = async (uri: string) => {
-    try { if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri); }
-    catch (e: any) { Alert.alert('Share failed', String(e?.message || e)); }
-  };
-
   const isCover = (s: Sticker) => pack?.coverStickerId === s.id;
 
-  const stickerMenu = (s: Sticker) => {
+  // Tapping a sticker opens it. Everything you can do to one sticker lives there,
+  // including cropping it again and removing its background.
+  const openSticker = (s: Sticker) => {
     Haptics.selectionAsync();
-    Alert.alert('Sticker', isCover(s) ? 'This is the pack icon' : undefined, [
-      ...(isCover(s) ? [] : [{
-        text: 'Use as pack icon',
-        onPress: async () => { await setPackCover(packId, s.id); load(); },
-      }]),
-      { text: s.emoji ? `Emoji  ${s.emoji}` : 'Set emoji', onPress: () => setEmoji(s) },
-      { text: 'Share', onPress: () => shareOne(s.uri) },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: () => Alert.alert('Delete sticker?', 'Its slot becomes free again.', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: async () => { await deleteSticker(s.id); load(); } },
-        ]),
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
-  const setEmoji = async (s: Sticker) => {
-    const r = await nativePrompt({
-      title: 'Sticker emoji',
-      message: 'Used by Telegram and to search stickers in WhatsApp.',
-      fields: [{ placeholder: '😀', value: s.emoji }],
-    });
-    if (!r) return;
-    await setStickerEmoji(s.id, r[0] ?? '');
-    load();
+    nav.push({ name: 'sticker', stickerId: s.id, packId, packName: name });
   };
 
   const sendToTelegram = async () => {
@@ -256,7 +226,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
               return (
                 <Pressable key={s.id} disabled={locked}
                   style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
-                  onPress={() => stickerMenu(s)}>
+                  onPress={() => openSticker(s)}>
                   <Image source={{ uri: s.uri }} style={styles.tileImg} contentFit="cover"
                     transition={140} cachePolicy="none" />
                   {isCover(s) ? (

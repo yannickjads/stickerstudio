@@ -333,15 +333,19 @@ export async function getAsset(id: string): Promise<Asset | null> {
 // uri, then deletes the old one — a new path busts any <Image> uri cache.
 export async function updateStickerImage(
   stickerId: string, newTempUri: string, width: number, height: number,
+  animated?: boolean,
 ): Promise<void> {
   const d = await db();
   const s = await d.getFirstAsync<Sticker>(`SELECT * FROM stickers WHERE id=?`, [stickerId]);
   if (!s) throw new Error('Sticker not found');
   const newUri = await saveRender(newTempUri, newId());
   const now = Date.now();
+  // Cutting the background out of an animated sticker flattens it, so the flag
+  // has to travel with the new image or exports would still promise animation.
+  const anim = animated == null ? s.animated : animated;
   try {
-    await d.runAsync(`UPDATE stickers SET uri=?, width=?, height=?, updatedAt=? WHERE id=?`,
-      [toRel(newUri), width, height, now, stickerId]);
+    await d.runAsync(`UPDATE stickers SET uri=?, width=?, height=?, animated=?, updatedAt=? WHERE id=?`,
+      [toRel(newUri), width, height, anim ? 1 : 0, now, stickerId]);
     await d.runAsync(`UPDATE packs SET updatedAt=? WHERE id=?`, [now, s.packId]);
   } catch (e) {
     await deleteRender(newUri);

@@ -84,6 +84,43 @@ export function LargeHeader({ title, right }: { title: string; right?: React.Rea
   );
 }
 
+// Inset grouped list, the way iOS presents a set of actions on one object:
+// a single rounded card, hairline separators inset to the label, no icons unless
+// they carry meaning.
+export function ListGroup({ children }: { children: React.ReactNode }) {
+  const items = React.Children.toArray(children).filter(Boolean);
+  return (
+    <View style={S.group}>
+      {items.map((child, i) => (
+        <React.Fragment key={i}>
+          {i > 0 ? <View style={S.sep} /> : null}
+          {child}
+        </React.Fragment>
+      ))}
+    </View>
+  );
+}
+
+export function Row({
+  label, value, onPress, destructive, disabled, icon,
+}: {
+  label: string; value?: string | null; onPress: () => void;
+  destructive?: boolean; disabled?: boolean; icon?: IconName;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [S.row, pressed && !disabled && { backgroundColor: C.surface2 }, disabled && S.disabled]}
+    >
+      {icon ? <Ionicons name={icon} size={19} color={destructive ? C.bad : C.accent} style={{ marginRight: 10 }} /> : null}
+      <Text style={[S.rowLabel, destructive && { color: C.bad }]} numberOfLines={1}>{label}</Text>
+      {value ? <Text style={S.rowValue} numberOfLines={1}>{value}</Text> : null}
+      {destructive ? null : <Ionicons name="chevron-forward" size={16} color={C.muted} />}
+    </Pressable>
+  );
+}
+
 const CORNER = Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : null;
 
 export const EDGE = 20; // one margin for the whole app: headers, grids, footers
@@ -127,6 +164,16 @@ export const S = StyleSheet.create({
   },
   ghostTxt: { color: C.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.2 },
   disabled: { opacity: 0.4 },
+
+  group: {
+    backgroundColor: C.surface, borderRadius: 14, ...CORNER, overflow: 'hidden',
+    marginHorizontal: EDGE,
+  },
+  row: { flexDirection: 'row', alignItems: 'center', minHeight: 48, paddingHorizontal: 16, gap: 10 },
+  rowLabel: { color: C.text, fontSize: 16, fontWeight: '500', flex: 1 },
+  rowValue: { color: C.muted, fontSize: 16, maxWidth: '45%' },
+  // Inset to the label, not the card edge — the iOS convention.
+  sep: { height: StyleSheet.hairlineWidth, backgroundColor: C.line, marginLeft: 16 },
 
   h2: { fontSize: 20, fontWeight: '700', color: C.text },
   muted: { color: C.muted, fontWeight: '600' },
