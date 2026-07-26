@@ -25,7 +25,8 @@
             }
           }
         ],
-        "CFBundleDocumentTypes": [
+        "LSSupportsOpeningDocumentsInPlace": false,
+      "CFBundleDocumentTypes": [
           {
             "CFBundleTypeName": "Sticker pack",
             "CFBundleTypeRole": "Editor",
