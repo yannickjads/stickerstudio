@@ -16,7 +16,11 @@ concurrency:
 
 jobs:
   upload:
-    runs-on: macos-15
+    # NOT macos-15, which ios.yml uses: Apple refuses any upload built with an SDK
+    # older than iOS 26, and that image's newest Xcode is 16.x (iOS 18.5). The
+    # ad-hoc pipeline is unaffected — nothing validates those builds — so it stays
+    # on the image it is known to work on.
+    runs-on: macos-26
     timeout-minutes: 60
 
     env:
@@ -34,8 +38,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+      # Pick the newest Xcode on the image rather than whatever /Applications/Xcode.app
+      # happens to point at, then prove the SDK is new enough BEFORE spending
+      # twenty minutes on an archive Apple will reject at the last step.
+      - name: Select the newest Xcode and check the SDK
+        run: |
+          set -euo pipefail
+          NEWEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$NEWEST"
+          echo "Using $NEWEST"
+          xcodebuild -version
+          SDK=$(xcrun --sdk iphoneos --show-sdk-version)
+          echo "iphoneos SDK = $SDK"
+          MAJOR=${SDK%%.*}
+          if [ "$MAJOR" -lt 26 ]; then
+            echo "::error::This runner's newest iOS SDK is $SDK. Apple rejects any upload built with less than iOS 26 — the runner image needs to be newer."
+            exit 1
+          fi
 
       # App Store Connect rejects a build whose number it has seen before for this
       # version, so it has to rise on every upload. This workflow's own run number
