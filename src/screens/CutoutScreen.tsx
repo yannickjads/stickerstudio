@@ -5,11 +5,11 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import {
-  Canvas, Group, Rect, Image as SkiaImage, Circle, Skia, ColorType, AlphaType,
+  Canvas, Rect, Image as SkiaImage, Circle, Skia, ColorType, AlphaType,
   ImageFormat, type SkImage,
 } from '@shopify/react-native-skia';
 import { C } from '../theme';
-import { Btn, Header, S } from '../ui';
+import { Btn, Header, NavText, S } from '../ui';
 import { Segmented, Slider } from '../editor/controls';
 import { checkerRects } from '../editor/checker';
 import type { Nav } from '../nav';
@@ -24,10 +24,8 @@ import {
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 // This screen never scrolls — a scroll view under a drawing gesture is a fight
 // nobody wins — so the canvas gives way to the controls on a short phone.
-const BOX = Math.max(220, Math.min(SCREEN_W - 44, 380, SCREEN_H - 430));
+const BOX = Math.max(220, Math.min(SCREEN_W - 44, 380, SCREEN_H - 390));
 const EDGE = Math.max(20, (SCREEN_W - BOX) / 2);
-const LOUPE = 104;         // magnifier under the fingertip
-const LOUPE_ZOOM = 2.6;
 const MAX_UNDO = 12;
 
 type Tool = 'wand' | 'erase' | 'restore';
@@ -75,6 +73,7 @@ export default function CutoutScreen({
   const [brush, setBrush] = useState(28);
   const [canUndo, setCanUndo] = useState(false);
   const [canAuto, setCanAuto] = useState(false);
+  const [ranAuto, setRanAuto] = useState(false);
   const [touch, setTouch] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => { cutoutSupported().then(setCanAuto); }, []);
@@ -205,6 +204,7 @@ export default function CutoutScreen({
       commit(snapshot());
       maskRef.current = maskFromAlpha(px, w, h);
       invalidate('full');
+      setRanAuto(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
       Alert.alert('Automatic cut-out failed', String(e?.message || e));
@@ -345,12 +345,11 @@ export default function CutoutScreen({
   const checks = React.useMemo(() => checkerRects(BOX), []);
 
   const brushOnScreen = brush / (sizeRef.current.w || BOX) * BOX;
-  // The loupe sits away from the finger, and swaps sides so it is never under it.
-  const loupeLeft = touch && touch.x < BOX / 2 ? BOX - LOUPE - 8 : 8;
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
-      <Header title={title ?? 'Background'} onBack={busy ? undefined : nav.pop} />
+      <Header title={title ?? 'Background'} onBack={busy ? undefined : nav.pop}
+        right={<NavText label="Done" onPress={done} disabled={!ready || !!busy} />} />
 
       <Text style={[S.hint, { textAlign: 'center', marginBottom: 10 }]}>
         {busy ?? HINT[tool]}
@@ -376,33 +375,35 @@ export default function CutoutScreen({
         </GestureDetector>
         <View pointerEvents="none" style={st.border} />
 
-        {/* Magnifier: a finger covers exactly the edge it is trying to trace. */}
-        {touch && img ? (
-          <View pointerEvents="none" style={[st.loupe, { left: loupeLeft }]}>
-            {/* the round border + overflow:hidden on the wrapper does the clipping */}
-            <Canvas style={{ width: LOUPE, height: LOUPE }}>
-              <Rect x={0} y={0} width={LOUPE} height={LOUPE} color="#171a23" />
-              <Group transform={[
-                { translateX: LOUPE / 2 - touch.x * LOUPE_ZOOM },
-                { translateY: LOUPE / 2 - touch.y * LOUPE_ZOOM },
-                { scale: LOUPE_ZOOM },
-              ]}>
-                <SkiaImage image={img} x={0} y={0} width={BOX} height={BOX} fit="fill" />
-                {tool === 'wand' ? null : (
-                  <Circle cx={touch.x} cy={touch.y} r={brushOnScreen} style="stroke" strokeWidth={1.5 / LOUPE_ZOOM}
-                    color={tool === 'erase' ? C.accent2 : C.accent} />
-                )}
-              </Group>
-            </Canvas>
-          </View>
-        ) : null}
-
         {!ready ? (
           <View style={[st.canvasWrap, st.loading]}><ActivityIndicator color={C.accent} /></View>
         ) : null}
       </View>
 
       <View style={st.controls}>
+        {/* The one thing most people want, as one button. Everything below it is
+            for fixing what the detector got wrong, and is dressed to look it. */}
+        {canAuto ? (
+          <Btn
+            label={ranAuto ? 'Detect subject again' : 'Remove background'}
+            onPress={auto}
+            busy={busy === 'finding the subject'}
+            disabled={!ready || !!busy}
+          />
+        ) : null}
+
+        <View style={st.toolsHead}>
+          <Text style={st.toolsTitle}>{canAuto ? 'Or do it by hand' : 'Remove by hand'}</Text>
+          <View style={st.miniRow}>
+            <Pressable onPress={undo} disabled={!canUndo || !!busy} hitSlop={8}>
+              <Text style={[st.mini, (!canUndo || !!busy) && st.miniOff]}>Undo</Text>
+            </Pressable>
+            <Pressable onPress={reset} disabled={!ready || !!busy} hitSlop={8}>
+              <Text style={[st.mini, (!ready || !!busy) && st.miniOff]}>Reset</Text>
+            </Pressable>
+          </View>
+        </View>
+
         <Segmented options={TOOLS} value={tool} onChange={setTool} />
 
         {tool === 'wand' ? (
@@ -434,13 +435,6 @@ export default function CutoutScreen({
           </View>
         )}
 
-        <View style={st.actions}>
-          <Btn label="Auto" kind="ghost" onPress={auto} disabled={!canAuto || !ready || !!busy} style={st.action} />
-          <Btn label="Undo" kind="ghost" onPress={undo} disabled={!canUndo || !!busy} style={st.action} />
-          <Btn label="Reset" kind="ghost" onPress={reset} disabled={!ready || !!busy} style={st.action} />
-        </View>
-
-        <Btn label="Done" onPress={done} busy={busy === 'saving'} disabled={!ready || !!busy} />
       </View>
     </View>
   );
@@ -456,11 +450,15 @@ const st = StyleSheet.create({
     borderRadius: 14, borderCurve: 'continuous', borderWidth: 2, borderColor: C.accent,
   },
   loading: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
-  loupe: {
-    position: 'absolute', top: 8, width: LOUPE, height: LOUPE, borderRadius: LOUPE / 2,
-    overflow: 'hidden', borderWidth: 2, borderColor: C.line, backgroundColor: C.surface,
-  },
   controls: { paddingHorizontal: EDGE, marginTop: 18, gap: 14 },
+  toolsHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 4, marginBottom: -4,
+  },
+  toolsTitle: { color: C.muted, fontSize: 13, fontWeight: '600', letterSpacing: 0.2 },
+  miniRow: { flexDirection: 'row', gap: 18 },
+  mini: { color: C.accent, fontSize: 15, fontWeight: '600' },
+  miniOff: { opacity: 0.3 },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   sliderLabel: { color: C.muted, fontSize: 14, fontWeight: '600', width: 74 },
   scopeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: -4 },
