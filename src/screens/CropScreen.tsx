@@ -324,7 +324,8 @@ export default function CropScreen({ nav, packId, packName, startSlot }: { nav: 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
       <Header title={`Crop for ${packName}`} onBack={busy ? undefined : nav.pop}
-        right={<NavText label="Centre all" onPress={autoCentreAll} disabled={busy} />} />
+        right={<NavText label={items.length > 1 ? 'Centre all' : 'Centre'}
+          onPress={autoCentreAll} disabled={busy} />} />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
         <Text style={[S.hint, { textAlign: 'center', marginBottom: 10 }]}>
           {busy && progress ? progress : `${index + 1} / ${items.length} · drag to move · pinch to zoom`}

@@ -42,7 +42,7 @@ export function NavText({ label, onPress, disabled }: { label: string; onPress: 
   return (
     <Pressable onPress={onPress} disabled={disabled} hitSlop={8}
       style={({ pressed }) => [S.navText, (pressed || disabled) && { opacity: disabled ? 0.35 : 0.55 }]}>
-      <Text style={S.navTextTxt}>{label}</Text>
+      <Text style={S.navTextTxt} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
@@ -93,10 +93,15 @@ export const S = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: EDGE,
     height: 48, gap: 4,
   },
-  headerSide: { width: 76, justifyContent: 'center' },
+  // Flexible rather than a fixed width: a fixed side clips or wraps any label
+  // that happens to be longer than it. The title still centres in what's left.
+  headerSide: { minWidth: 44, justifyContent: 'center' },
   // pull the chevron's ink onto the shared margin (the glyph has side bearing)
   back: { height: 44, justifyContent: 'center', marginLeft: -8 },
-  headerTitle: { flex: 1, textAlign: 'center', color: C.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.2 },
+  headerTitle: {
+    flex: 1, textAlign: 'center', color: C.text, fontSize: 17, fontWeight: '600',
+    letterSpacing: -0.2, marginHorizontal: 4,
+  },
 
   largeHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
