@@ -47,12 +47,17 @@ export default function App() {
         }
         const r = kind === 'stickers'
           ? await importWastickers(url)
-          : await importPacksFromZip(url).then((x) => ({ name: `${x.packs} pack(s)`, stickers: x.stickers, skipped: x.skipped, dropped: 0 }));
+          : await importPacksFromZip(url).then((x) => ({ name: `${x.packs} pack(s)`, stickers: x.stickers, skipped: x.skipped, dropped: 0, tray: false }));
         setStack([{ name: 'packs' }]);
         setReload((n) => n + 1);
         Alert.alert('Imported', `${r.name} · ${r.stickers} sticker${r.stickers === 1 ? '' : 's'}`
           + (r.skipped ? `\n${r.skipped} could not be read.` : '')
-          + (r.dropped ? `\n${r.dropped} didn't fit — a pack holds ${PACK_MAX}.` : ''));
+          + (r.dropped ? `\n${r.dropped} didn't fit — a pack holds ${PACK_MAX}.` : '')
+          // Say out loud whether the archive's own icon was recognised: a pack that
+          // imports one sticker too many is then immediately explainable.
+          + (kind === 'stickers'
+            ? (r.tray ? '\nIts pack icon was kept separately.' : '\nNo separate pack icon in that file.')
+            : ''));
       } catch (e: any) {
         Alert.alert('Could not import', String(e?.message || e));
       } finally {

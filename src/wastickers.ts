@@ -13,7 +13,7 @@ import {
 } from './editor/whatsappExport';
 import { base64ToBytes } from './editor/webpMux';
 import { imageKind, isAnimatedBytes, extensionFor } from './editor/imageKind';
-import { stickerEntries, isTrayFile } from './packArchive';
+import { stickerEntries, trayEntries } from './packArchive';
 
 const safeName = (s: string) =>
   (s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pack').slice(0, 40);
@@ -46,7 +46,10 @@ export async function exportWastickers(
 // ------------------------------------------------------------------ import
 // `dropped` is what didn't fit: a pack can hold 30, and quietly binning the rest
 // would look like the import had simply lost them.
-export type WaImportResult = { name: string; stickers: number; skipped: number; dropped: number };
+export type WaImportResult = {
+  name: string; stickers: number; skipped: number; dropped: number;
+  tray: boolean; // whether the archive's own icon was recognised and kept
+};
 
 const entriesOf = (zip: JSZip) =>
   stickerEntries(Object.keys(zip.files), (n) => zip.files[n].dir);
@@ -99,8 +102,8 @@ export async function importWastickers(
   // The tray icon travels with the pack and is NOT one of its stickers, so keep it
   // as the pack's own icon rather than dropping it on the floor (or, worse,
   // importing it as sticker 1 and spending a slot on it).
-  const trayName = Object.keys(zip.files)
-    .find((n) => !zip.files[n].dir && isTrayFile(n));
+  let tray = false;
+  const trayName = trayEntries(Object.keys(zip.files), (n) => zip.files[n].dir)[0];
   if (trayName) {
     let tmp = '';
     try {
@@ -109,6 +112,7 @@ export async function importWastickers(
       if (kind !== 'unknown') {
         tmp = await writeTempBytes(bytes, extensionFor(kind));
         await setPackTrayImage(pack.id, tmp);
+        tray = true;
       }
     } catch (e) {
       console.warn('could not keep the pack icon from that file:', e);
@@ -116,7 +120,7 @@ export async function importWastickers(
       if (tmp) await deleteFile(tmp);
     }
   }
-  return { name: pack.name, stickers: ok, skipped, dropped: Math.max(0, entries.length - PACK_MAX) };
+  return { name: pack.name, stickers: ok, skipped, tray, dropped: Math.max(0, entries.length - PACK_MAX) };
 }
 
 // Does this file look like a sticker pack we can read?
