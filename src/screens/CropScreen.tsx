@@ -39,7 +39,8 @@ type Shape = 'square' | 'original' | 'free';
 const { width: SCREEN_W } = Dimensions.get('window');
 const BOX = Math.min(SCREEN_W - 44, 380);
 const EDGE = (SCREEN_W - BOX) / 2; // everything aligns to the crop box edges
-const HANDLE = 34;      // freeform corner grip
+const HANDLE = 48;      // freeform corner: the touch target
+const GRIP = 22;        // ...and the bracket drawn inside it
 const FREE_MIN = 120;   // smallest the crop window may be dragged (caps the ratio at ~3:1)
 
 export default function CropScreen({ nav, packId, packName, startSlot, editStickerId, source = 'photos' }: { nav: Nav; packId: string; packName: string; startSlot?: number; editStickerId?: string; source?: MediaSource }) {
@@ -546,11 +547,11 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
               thumb and crowds the buttons directly beneath the picture. */}
           {aspect === 'free' && !preview ? (
             <GestureDetector gesture={cornerGesture}>
-              <View style={[st.handle, {
+              <View style={[st.handleHit, {
                 left: BOX / 2 + vw / 2 - HANDLE / 2,
                 top: BOX / 2 - vh / 2 - HANDLE / 2,
               }]}>
-                <Ionicons name="resize" size={16} color={C.ink} style={st.handleIcon} />
+                <View style={st.handleMark} />
               </View>
             </GestureDetector>
           ) : null}
@@ -688,14 +689,21 @@ const st = StyleSheet.create({
     borderRadius: 999, backgroundColor: 'rgba(10,12,18,0.72)',
   },
   previewTagTxt: { color: C.text, fontSize: 12, fontWeight: '600' },
-  handle: {
-    position: 'absolute', width: HANDLE, height: HANDLE, borderRadius: HANDLE / 2,
-    backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: C.bg,
+  // A finger-sized target centred on the corner; nothing is drawn on it, so the
+  // grip can stay small without being hard to hit.
+  handleHit: { position: 'absolute', width: HANDLE, height: HANDLE },
+  // The grip itself: an L hugging the corner from the inside, the way every photo
+  // cropper marks one. A bracket has no direction, so unlike an arrow glyph there
+  // is no way for it to end up pointing along the edge instead of across it.
+  handleMark: {
+    position: 'absolute',
+    left: HANDLE / 2 - GRIP, top: HANDLE / 2,
+    width: GRIP, height: GRIP,
+    borderTopWidth: 3, borderRightWidth: 3, borderColor: C.accent,
+    borderTopRightRadius: 12,
+    // Keeps it readable over a pale photo, where cyan on white would vanish.
+    shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
   },
-  // The glyph's arrows run north-west to south-east; rotating it points them along
-  // the corner it actually sits on.
-  handleIcon: { transform: [{ rotate: '90deg' }] },
   lengthOn: { backgroundColor: C.accent },
   lengthTxt: { color: C.text, fontSize: 13, fontWeight: '600' },
   lengthTxtOn: { color: C.ink },
