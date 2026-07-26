@@ -13,6 +13,7 @@ import {
 } from './editor/whatsappExport';
 import { base64ToBytes } from './editor/webpMux';
 import { imageKind, isAnimatedBytes, extensionFor } from './editor/imageKind';
+import { stickerEntries } from './packArchive';
 
 const safeName = (s: string) =>
   (s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pack').slice(0, 40);
@@ -43,7 +44,12 @@ export async function exportWastickers(
 }
 
 // ------------------------------------------------------------------ import
-export type WaImportResult = { name: string; stickers: number; skipped: number };
+// `dropped` is what didn't fit: a pack can hold 30, and quietly binning the rest
+// would look like the import had simply lost them.
+export type WaImportResult = { name: string; stickers: number; skipped: number; dropped: number };
+
+const entriesOf = (zip: JSZip) =>
+  stickerEntries(Object.keys(zip.files), (n) => zip.files[n].dir);
 
 export async function importWastickers(
   uri: string, onProgress?: (done: number, total: number) => void,
@@ -54,13 +60,7 @@ export async function importWastickers(
     const f = zip.file(name);
     return f ? (await f.async('string')).trim() : '';
   };
-  // Sticker files are sticker-01.webp…; accept any order/extension the zip uses.
-  // Sort by the NUMBER, not the string: packs written without zero padding
-  // ("sticker-2" … "sticker-10") would otherwise come out badly reordered.
-  const numberOf = (n: string) => Number(n.match(/sticker[-_]?(\d+)\./i)?.[1] ?? 0);
-  const entries = Object.keys(zip.files)
-    .filter((n) => /(^|\/)sticker[-_]?\d+\.(webp|png|gif)$/i.test(n) && !zip.files[n].dir)
-    .sort((a, b) => numberOf(a) - numberOf(b) || a.localeCompare(b));
+  const entries = entriesOf(zip);
   if (!entries.length) throw new Error('That file does not contain any stickers.');
 
   const title = (await read('title.txt')) || 'Imported pack';
@@ -95,10 +95,29 @@ export async function importWastickers(
     await deletePack(pack.id);
     throw new Error('None of the stickers in that file could be read.');
   }
-  return { name: pack.name, stickers: ok, skipped };
+  return { name: pack.name, stickers: ok, skipped, dropped: Math.max(0, entries.length - PACK_MAX) };
 }
 
 // Does this file look like a sticker pack we can read?
 export function isWastickersFile(uri: string): boolean {
   return /\.wastickers(\?|$)/i.test(uri);
+}
+
+export type ArchiveKind = 'backup' | 'stickers' | 'unknown';
+
+/**
+ * What is actually inside the file, regardless of what it is called.
+ *
+ * Sharing a pack out of another app hands us whatever extension that app chose —
+ * the share sheet shows it as a plain "Archive" — so routing on the extension
+ * sent perfectly good packs to the backup reader and vice versa. Open it and look.
+ */
+export async function archiveKind(uri: string): Promise<ArchiveKind> {
+  try {
+    const zip = await JSZip.loadAsync(await new File(uri).bytes());
+    if (zip.file('manifest.json')) return 'backup';
+    return entriesOf(zip).length ? 'stickers' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }

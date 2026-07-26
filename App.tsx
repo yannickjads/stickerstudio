@@ -5,8 +5,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { C } from './src/theme';
 import { initStorage } from './src/storage';
-import { importWastickers, isWastickersFile } from './src/wastickers';
+import { importWastickers, isWastickersFile, archiveKind } from './src/wastickers';
 import { importPacksFromZip } from './src/backup';
+import { PACK_MAX } from './src/types';
 import type { Route, Nav } from './src/nav';
 import PacksScreen from './src/screens/PacksScreen';
 import PackScreen from './src/screens/PackScreen';
@@ -30,17 +31,28 @@ export default function App() {
   useEffect(() => {
     const open = async (url: string | null) => {
       if (!url || handling.current) return;
-      if (!/\.(wastickers|zip)(\?|$)/i.test(url)) return;
+      // Anything handed to us as a file, whatever it is called. Sharing a pack
+      // straight out of another sticker app gives it that app's extension — often
+      // just ".zip" — so the archive's CONTENTS decide how to read it.
+      if (!/^file:\/\//i.test(url)) return;
       handling.current = true;
       try {
         await initStorage();
-        const r = isWastickersFile(url)
+        const kind = await archiveKind(url);
+        if (kind === 'unknown') {
+          if (isWastickersFile(url) || /\.zip(\?|$)/i.test(url)) {
+            Alert.alert('Could not import', 'That file has no sticker pack in it.');
+          }
+          return;
+        }
+        const r = kind === 'stickers'
           ? await importWastickers(url)
-          : await importPacksFromZip(url).then((x) => ({ name: `${x.packs} pack(s)`, stickers: x.stickers, skipped: x.skipped }));
+          : await importPacksFromZip(url).then((x) => ({ name: `${x.packs} pack(s)`, stickers: x.stickers, skipped: x.skipped, dropped: 0 }));
         setStack([{ name: 'packs' }]);
         setReload((n) => n + 1);
         Alert.alert('Imported', `${r.name} · ${r.stickers} sticker${r.stickers === 1 ? '' : 's'}`
-          + (r.skipped ? `\n${r.skipped} could not be read.` : ''));
+          + (r.skipped ? `\n${r.skipped} could not be read.` : '')
+          + (r.dropped ? `\n${r.dropped} didn't fit — a pack holds ${PACK_MAX}.` : ''));
       } catch (e: any) {
         Alert.alert('Could not import', String(e?.message || e));
       } finally {

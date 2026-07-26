@@ -109,9 +109,15 @@ export function floodRemove(
     for (let i = 0; i < hit.length; i++) if (match(i)) hit[i] = 1;
   }
 
+  // Counted in visible pixels: a tap that only clears alpha nobody could see is a
+  // tap that did nothing, and the caller uses this to decide whether the action
+  // is worth an undo step.
   let removed = 0;
   for (let i = 0; i < hit.length; i++) {
-    if (hit[i] && mask[i] !== 0) { mask[i] = 0; removed++; }
+    if (hit[i] && mask[i] !== 0) {
+      if (mask[i] >= 8) removed++;
+      mask[i] = 0;
+    }
   }
 
   // The rim: kept pixels touching a removed one are part background. How much
@@ -181,6 +187,13 @@ export function paintStroke(
  * Soften the cut. A hard 1-bit edge is what makes a manual cut-out look pasted
  * on; one box-blur pass gives every boundary pixel a partial alpha while leaving
  * solid interiors untouched (all nine neighbours agree there).
+ *
+ * The blur may only ever take alpha away, never add it. A plain box blur is
+ * symmetric, so it lifts removed pixels next to kept ones from 0 up to ~85 —
+ * which paints a partial-alpha halo of the background back on, the exact thing
+ * the cut-out existed to get rid of. Clamping to the original value turns the
+ * blur into a one-sided erode.
+ *
  * Radius 0 returns the mask unchanged.
  */
 export function feather(mask: Mask, w: number, h: number, radius = 1): Mask {
@@ -198,7 +211,9 @@ export function feather(mask: Mask, w: number, h: number, radius = 1): Mask {
           for (let xx = x0; xx <= x1; xx++) sum += src[row + xx];
         }
         const n = (y1 - y0 + 1) * (x1 - x0 + 1);
-        out[y * w + x] = (sum / n) | 0;
+        const i = y * w + x;
+        const blurred = (sum / n) | 0;
+        out[i] = blurred < src[i] ? blurred : src[i];
       }
     }
     src = out;
@@ -211,6 +226,12 @@ export function feather(mask: Mask, w: number, h: number, radius = 1): Mask {
  * preview and, at the end, the saved cut-out. Passing `into` + `dirty` rewrites
  * only the patch the brush just touched, which is what keeps a drag at 60fps:
  * a full 512² rebuild is ~1.5ms, a brush move ~0.05ms.
+ *
+ * The mask caps the alpha rather than scaling it. For an opaque photo — every
+ * ordinary sticker — the two are identical, but capping is what makes editing a
+ * cut-out a second time safe: the mask starts life as a copy of the source alpha
+ * (see maskFromAlpha), so scaling would square every partial edge and eat the
+ * anti-aliasing a little more on each visit.
  */
 export function compositeInto(
   rgba: Uint8Array, mask: Mask, w: number, h: number,
@@ -226,9 +247,9 @@ export function compositeInto(
     let i = y * w + x0;
     let p = i * 4;
     for (let x = x0; x <= x1; x++, i++, p += 4) {
-      const m = mask[i];
+      const m = mask[i], a = rgba[p + 3];
       buf[p] = rgba[p]; buf[p + 1] = rgba[p + 1]; buf[p + 2] = rgba[p + 2];
-      buf[p + 3] = m === 255 ? rgba[p + 3] : m === 0 ? 0 : ((rgba[p + 3] * m) / 255) | 0;
+      buf[p + 3] = m < a ? m : a;
     }
   }
   return buf;

@@ -427,6 +427,31 @@ export async function deleteDocumentAndAssets(documentId: string | null): Promis
   await d.runAsync(`DELETE FROM documents WHERE id=?`, [documentId]);
 }
 
+/**
+ * Point a document's image layer at a new source file. Used after a destructive
+ * edit — removing the background — so that cropping the sticker again crops the
+ * cut-out rather than quietly reinstating the background from the old original.
+ * The replaced asset is deleted: assets are private per document (see above).
+ */
+export async function replaceDocumentImage(
+  documentId: string, sourceUri: string, width: number, height: number,
+): Promise<void> {
+  const doc = await getDocument(documentId);
+  const layer = doc?.layers.find((l) => l.type === 'image');
+  if (!doc || !layer || layer.type !== 'image') return;
+  const oldAssetId = layer.assetId;
+  const asset = await createAsset(sourceUri, width, height);
+  await updateDocument({
+    ...doc,
+    layers: doc.layers.map((l) => (l.id === layer.id
+      ? { ...l, assetId: asset.id, crop: { x: 0, y: 0, width, height } }
+      : l)),
+    updatedAt: Date.now(),
+  });
+  // Only once the document no longer references it.
+  if (oldAssetId && oldAssetId !== asset.id) await deleteAssetById(oldAssetId);
+}
+
 // Remove a single asset row + file (idempotent; used for orphan cleanup when a
 // document row was never created).
 export async function deleteAssetById(id: string): Promise<void> {

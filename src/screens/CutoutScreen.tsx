@@ -146,6 +146,8 @@ export default function CutoutScreen({
         setImg(makeImage(viewRef.current));
         setReady(true);
       } catch (e: any) {
+        // The alert pops a screen; if the user already left, it would pop theirs.
+        if (!alive) return;
         Alert.alert('Could not open this image', String(e?.message || e), [{ text: 'OK', onPress: nav.pop }]);
       }
     })();
@@ -153,10 +155,17 @@ export default function CutoutScreen({
   }, [uri, makeImage, nav]);
 
   // ---------------------------------------------------------------- history
-  const push = useCallback(() => {
+  // Snapshot first, commit only once the edit turns out to have changed something:
+  // pushing then popping would silently drop the OLDEST step whenever the stack is
+  // full, so a no-op tap would quietly cost you an undo.
+  const snapshot = useCallback(() => {
     const m = maskRef.current;
-    if (!m) return;
-    history.current.push(new Uint8Array(m));
+    return m ? new Uint8Array(m) : null;
+  }, []);
+
+  const commit = useCallback((before: Uint8Array | null) => {
+    if (!before) return;
+    history.current.push(before);
     if (history.current.length > MAX_UNDO) history.current.shift();
     setCanUndo(true);
   }, []);
@@ -173,11 +182,11 @@ export default function CutoutScreen({
   const reset = useCallback(() => {
     const rgba = rgbaRef.current;
     if (!rgba) return;
-    push();
+    commit(snapshot());
     const { w, h } = sizeRef.current;
     maskRef.current = fullMask(w, h);
     invalidate('full');
-  }, [push, invalidate]);
+  }, [snapshot, commit, invalidate]);
 
   // ---------------------------------------------------------------- auto
   const auto = useCallback(async () => {
@@ -193,21 +202,25 @@ export default function CutoutScreen({
       });
       im.dispose();
       if (!(px instanceof Uint8Array)) throw new Error('Could not read the cut-out.');
-      push();
+      commit(snapshot());
       maskRef.current = maskFromAlpha(px, w, h);
       invalidate('full');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
       Alert.alert('Automatic cut-out failed', String(e?.message || e));
     } finally { setBusy(null); }
-  }, [busy, uri, push, invalidate]);
+  }, [busy, uri, snapshot, commit, invalidate]);
 
   // ---------------------------------------------------------------- editing
   // The settings the touch handlers read live in refs, so the gesture below can
   // be built once and never replaced. Rebuilding a gesture object mid-drag — which
   // is what happens if it depends on state that changes on every touch move — is
   // how a brush stroke ends up cut in half.
-  const scale = () => sizeRef.current.w / BOX; // screen points -> image pixels
+  // Screen points -> image pixels, per axis. The source is square in every path
+  // that exists today, but one shared factor would silently shear a picture that
+  // isn't, and that is not a failure worth discovering on a device.
+  const sx = () => sizeRef.current.w / BOX;
+  const sy = () => sizeRef.current.h / BOX;
   const toolRef = useRef(tool);
   const brushRef = useRef(brush);
   const tolRef = useRef(tolerance);
@@ -223,57 +236,72 @@ export default function CutoutScreen({
     const rgba = rgbaRef.current, mask = maskRef.current;
     if (!rgba || !mask) return;
     const { w, h } = sizeRef.current;
-    push();
-    const n = floodRemove(rgba, w, h, mask, x * scale(), y * scale(), tolRef.current,
+    const before = snapshot();
+    const n = floodRemove(rgba, w, h, mask, x * sx(), y * sy(), tolRef.current,
       { connected: !everywhereRef.current });
-    // Nothing matched: don't leave a no-op sitting on the undo stack.
-    if (n === 0) { history.current.pop(); setCanUndo(history.current.length > 0); return; }
+    if (n === 0) return; // nothing matched: not an edit, so not an undo step
+    commit(before);
     invalidate('full');
     Haptics.selectionAsync();
-  }, [push, invalidate]);
+  }, [snapshot, commit, invalidate]);
 
   const last = useRef<{ x: number; y: number } | null>(null);
   const down = useRef<{ x: number; y: number; moved: number } | null>(null);
+  const before = useRef<Uint8Array | null>(null);  // mask as it was when the stroke began
+  const painted = useRef(false);
 
   const paintTo = useCallback((x: number, y: number) => {
     const mask = maskRef.current;
     if (!mask) return;
     const { w, h } = sizeRef.current;
-    const px = x * scale(), py = y * scale();
+    const px = x * sx(), py = y * sy();
     // From the previous point, so a fast swipe is a band and not a dotted line.
     const a = last.current ?? { x: px, y: py };
     const d = paintStroke(mask, w, h, a.x, a.y, px, py, brushRef.current,
       toolRef.current === 'erase' ? 0 : 255);
     last.current = { x: px, y: py };
-    setTouch({ x, y });
-    if (d) invalidate(d);
+    if (d) { painted.current = true; invalidate(d); }
   }, [invalidate]);
 
   const onDown = useCallback((x: number, y: number) => {
     if (blockedRef.current) return;
     down.current = { x, y, moved: 0 };
+    setTouch({ x, y });      // also for the wand: the loupe is how you aim
     if (toolRef.current === 'wand') return;
-    push();
+    before.current = snapshot();
+    painted.current = false;
     last.current = null;
     paintTo(x, y);
-  }, [push, paintTo]);
+  }, [snapshot, paintTo]);
 
   const onMove = useCallback((x: number, y: number) => {
     const d = down.current;
     if (!d) return;
     d.moved = Math.max(d.moved, Math.hypot(x - d.x, y - d.y));
+    setTouch({ x, y });
     if (toolRef.current === 'wand') return;
     paintTo(x, y);
   }, [paintTo]);
 
-  const onUp = useCallback(() => {
+  // `success` is false when the system took the touch away — a notification, a
+  // phone call, an edge swipe. Finishing the gesture is right either way; acting
+  // on it is not.
+  const onUp = useCallback((success: boolean) => {
     const d = down.current;
+    const was = before.current;
     down.current = null;
     last.current = null;
+    before.current = null;
     setTouch(null);
-    // A wand "tap" is a press that didn't wander — same gesture, different ending.
-    if (d && toolRef.current === 'wand' && d.moved < 12) wandAt(d.x, d.y);
-  }, [wandAt]);
+    if (toolRef.current === 'wand') {
+      // A wand "tap" is a press that didn't wander — same gesture, different ending.
+      if (success && d && d.moved < 12) wandAt(d.x, d.y);
+      return;
+    }
+    // A stroke that changed no pixel is not worth an undo step.
+    if (painted.current) commit(was);
+    painted.current = false;
+  }, [wandAt, commit]);
 
   // One gesture for all three tools, built once: which one runs is decided inside.
   const gesture = React.useMemo(() => Gesture.Pan()
@@ -281,7 +309,7 @@ export default function CutoutScreen({
     .minDistance(0)
     .onBegin((e) => { 'worklet'; runOnJS(onDown)(e.x, e.y); })
     .onUpdate((e) => { 'worklet'; runOnJS(onMove)(e.x, e.y); })
-    .onFinalize(() => { 'worklet'; runOnJS(onUp)(); }),
+    .onFinalize((_e, success) => { 'worklet'; runOnJS(onUp)(success); }),
   [onDown, onMove, onUp]);
 
   // ---------------------------------------------------------------- save
@@ -329,6 +357,9 @@ export default function CutoutScreen({
       </Text>
 
       <View style={{ width: BOX, height: BOX, alignSelf: 'center' }}>
+        {/* The border lives on a sibling overlay, not on the gesture's own view:
+            a borderWidth insets the child canvas, which would offset every touch
+            coordinate by exactly that many points against the image. */}
         <GestureDetector gesture={gesture}>
           <View style={st.canvasWrap} collapsable={false}>
             <Canvas style={{ width: BOX, height: BOX }}>
@@ -343,6 +374,7 @@ export default function CutoutScreen({
             </Canvas>
           </View>
         </GestureDetector>
+        <View pointerEvents="none" style={st.border} />
 
         {/* Magnifier: a finger covers exactly the edge it is trying to trace. */}
         {touch && img ? (
@@ -417,7 +449,11 @@ export default function CutoutScreen({
 const st = StyleSheet.create({
   canvasWrap: {
     width: BOX, height: BOX, borderRadius: 14, borderCurve: 'continuous', overflow: 'hidden',
-    borderWidth: 2, borderColor: C.accent, backgroundColor: C.surface,
+    backgroundColor: C.surface,
+  },
+  border: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    borderRadius: 14, borderCurve: 'continuous', borderWidth: 2, borderColor: C.accent,
   },
   loading: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   loupe: {

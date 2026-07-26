@@ -12,10 +12,12 @@ import type { Nav } from '../nav';
 import type { Asset, Pack, Sticker } from '../types';
 import {
   getSticker, getPack, getAsset, getDocument, deleteSticker, setPackCover,
-  setStickerEmoji, updateStickerImage,
+  setStickerEmoji, updateStickerImage, replaceDocumentImage,
 } from '../db';
 import { nativePrompt } from '../../modules/native-prompt';
+import { deleteFile } from '../storage';
 import { STICKER_SIZE } from '../editor/renderCrop';
+import { maybeAnimatedSource } from '../editor/renderAnimated';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const BOX = Math.min(SCREEN_W - EDGE * 2, 300);
@@ -57,8 +59,9 @@ export default function StickerScreen({
 
   const isCover = pack?.coverStickerId === sticker.id;
   // A clip's stored original is only its poster frame, so re-cropping it would
-  // quietly throw the animation away. Offer it only when the source can carry it.
-  const canRecrop = !!asset && (!sticker.animated || /\.gif$/i.test(asset.localUri));
+  // quietly throw the animation away. Judge the source with the same test the
+  // render pipeline uses, so an animated WebP is allowed and a poster is not.
+  const canRecrop = !!asset && (!sticker.animated || maybeAnimatedSource(asset.localUri, null));
 
   const setEmoji = async () => {
     const r = await nativePrompt({
@@ -78,6 +81,13 @@ export default function StickerScreen({
       title: 'Background',
       onDone: async (file) => {
         await updateStickerImage(sticker.id, file, STICKER_SIZE, STICKER_SIZE, false);
+        // The cut-out becomes the sticker's original too, otherwise "Crop again"
+        // would re-render from the old source and hand the background back.
+        if (sticker.documentId) {
+          try { await replaceDocumentImage(sticker.documentId, file, STICKER_SIZE, STICKER_SIZE); }
+          catch (e) { console.warn('could not re-point the document at the cut-out:', e); }
+        }
+        await deleteFile(file); // both copies are made; the temp has done its job
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       },
     });
@@ -142,7 +152,8 @@ export default function StickerScreen({
           <ListGroup>
             <Row label="Remove background" onPress={removeBackground} />
             <Row label="Crop again" onPress={() => nav.push({ name: 'crop', packId, packName, editStickerId: sticker.id })}
-              disabled={!canRecrop} value={canRecrop ? null : 'Not for clips'} />
+              disabled={!canRecrop}
+              value={canRecrop ? null : asset ? 'Not for clips' : 'No original kept'} />
           </ListGroup>
 
           <ListGroup>
