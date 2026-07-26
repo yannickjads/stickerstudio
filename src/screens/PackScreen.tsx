@@ -97,9 +97,10 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     const go = (source: MediaSource) =>
       nav.push({ name: 'crop', packId, packName: name, startSlot: slot, source });
     Alert.alert('New sticker', undefined, [
-      { text: 'From a photo or GIF', onPress: () => go('photos') },
-      { text: 'From a video', onPress: () => go('videos') },
-      { text: 'From a file', onPress: () => go('files') },
+      { text: 'Photo or GIF', onPress: () => go('photos') },
+      { text: 'Video', onPress: () => go('videos') },
+      { text: 'Photos and videos together', onPress: () => go('mixed') },
+      { text: 'File', onPress: () => go('files') },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };

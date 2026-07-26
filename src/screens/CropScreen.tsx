@@ -1,15 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Dimensions, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { Image } from 'expo-image';
 import { File } from 'expo-file-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useSharedValue } from 'react-native-reanimated';
+import { runOnJS, useSharedValue } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { C } from '../theme';
-import { Btn, Header, NavText, S } from '../ui';
+import { Btn, Header, S } from '../ui';
 import type { Nav, MediaSource } from '../nav';
 import type { EditorDocument } from '../types';
 import { DOC_SCHEMA_VERSION, PACK_MAX } from '../types';
@@ -26,20 +27,20 @@ import {
   type QualityKey,
 } from '../editor/renderVideo';
 import { videoInfo, extractFrames } from '../../modules/video-frames';
-import { cutoutSupported } from '../../modules/subject-cutout';
 import Cropper from '../SquareCropper';
-import CutoutScreen from './CutoutScreen';
 import { Slider } from '../editor/controls';
 
 type Item = {
   id: string; uri: string; w: number; h: number; maybeAnimated: boolean;
   video?: { durationMs: number };  // set for clips
   poster?: string;                 // still frame shown in the cropper
-  cut?: boolean;                   // its background has already been removed
 };
+type Shape = 'square' | 'original' | 'free';
 const { width: SCREEN_W } = Dimensions.get('window');
 const BOX = Math.min(SCREEN_W - 44, 380);
 const EDGE = (SCREEN_W - BOX) / 2; // everything aligns to the crop box edges
+const HANDLE = 34;      // freeform corner grip
+const FREE_MIN = 120;   // smallest the crop window may be dragged (caps the ratio at ~3:1)
 
 export default function CropScreen({ nav, packId, packName, startSlot, editStickerId, source = 'photos' }: { nav: Nav; packId: string; packName: string; startSlot?: number; editStickerId?: string; source?: MediaSource }) {
   const insets = useSafeAreaInsets();
@@ -60,12 +61,11 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   const dropPreview = () => setPreview((p) => { if (p) deleteFile(p.uri); return null; });
   // Shape of the crop. 'original' keeps the picture's own ratio; a sticker being
   // re-cropped carries whatever ratio it was made with, as customAr.
-  const [aspect, setAspect] = useState<'square' | 'original'>('square');
+  const [aspect, setAspect] = useState<Shape>('square');
   const [customAr, setCustomAr] = useState<number | null>(null);
-  const [canCutout, setCanCutout] = useState(false);
-  // The background editor, shown over this screen (see openCutout).
-  const [cutout, setCutout] = useState<{ uri: string; itemId: string } | null>(null);
-  useEffect(() => { cutoutSupported().then(setCanCutout); }, []);
+  // Freeform: the crop window itself is dragged to whatever shape you want.
+  const [free, setFree] = useState({ w: BOX, h: BOX });
+  const freeStart = useRef({ w: BOX, h: BOX });
   const launched = useRef(false);
   // Re-cropping an existing sticker: same screen, same maths, but it replaces one
   // sticker instead of filling slots.
@@ -115,8 +115,9 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         if (c && c.width > 0 && c.height > 0 && asset.width > 0 && asset.height > 0) {
           const ar = c.width / c.height;
           setCustomAr(ar);
-          const vw = ar >= 1 ? BOX : Math.max(1, Math.round(BOX * ar));
-          const vh = ar >= 1 ? Math.max(1, Math.round(BOX / ar)) : BOX;
+          // Same unrounded box the cropper will use, or the rect cannot be reproduced.
+          const vw = ar >= 1 ? BOX : BOX * ar;
+          const vh = ar >= 1 ? BOX / ar : BOX;
           const base = Math.max(vw / asset.width, vh / asset.height);
           const eff = vw / c.width;
           scale.value = Math.min(Math.max(eff / base, 1), 8);
@@ -142,8 +143,13 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
       type Picked = { uri: string; w: number; h: number; mime: string | null; video: boolean };
       let picks: Picked[] = [];
       if (source === 'files') {
+        // MIME types, not UTIs: expo-document-picker maps each one through
+        // UTType(mimeType:) and silently DROPS anything that fails, so a UTI like
+        // "public.image" leaves the picker with an empty allow-list and every file
+        // greyed out. "image/*" is special-cased to UTType.image, which covers
+        // webp, png, gif, jpeg and heic in one go.
         const res = await DocumentPicker.getDocumentAsync({
-          type: ['public.image', 'com.compuserve.gif'], multiple: true, copyToCacheDirectory: true,
+          type: ['image/*'], multiple: true, copyToCacheDirectory: true,
         });
         if (res.canceled || !res.assets?.length) { nav.pop(); return; }
         for (const a of res.assets) {
@@ -153,8 +159,11 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         }
       } else {
         const res = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: source === 'videos' ? ['videos'] : ['images'],
+          mediaTypes: source === 'videos' ? ['videos']
+            : source === 'mixed' ? ['images', 'videos']
+            : ['images'],
           allowsMultipleSelection: true, quality: 1,
+          orderedSelection: true, // a batch is processed in the order it was picked
         });
         if (res.canceled || !res.assets?.length) { nav.pop(); return; }
         picks = res.assets.map((a) => ({
@@ -214,80 +223,47 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
 
   const tick = (on: boolean, label: string) => (on ? `✓  ${label}` : label);
 
-  // Hand the framed crop to the background editor and take its answer back as the
-  // item's new source: already square, already cropped, so everything downstream
-  // carries on unchanged.
-  const openCutout = (it: Item) => {
-    if (busy) return;
-    const go = async () => {
-      setBusy(true);
-      setProgress('preparing');
-      let temp: string | null = null;
-      try {
-        const base = it.video ? (it.poster ?? it.uri) : await ensureDecodableUri(it.uri);
-        if (base !== it.uri && base !== it.poster) { temp = base; }
-        // The crop rect is measured against the item's own dimensions, but a clip's
-        // poster frame comes out of extraction downscaled — so measure what we
-        // actually have and scale the rect onto it.
-        const probe = await loadSkImage(base);
-        const probeW = probe.width();
-        const s = probeW / it.w;
-        probe.dispose();
-        const c = cropRect(it, false);
-        let crop = c;
-        if (s !== 1) {
-          const pw = probeW, ph = Math.round(it.h * s);
-          const cw = Math.max(1, Math.min(Math.round(c.width * s), pw));
-          // From the scaled width, not measured again: rounding both separately
-          // pulls a rect off its shape, and badly so when it is only a few pixels.
-          const ch = Math.max(1, Math.min(Math.round((cw * c.height) / c.width), ph));
-          crop = {
-            x: Math.min(Math.round(c.x * s), pw - cw),   // rounding must not
-            y: Math.min(Math.round(c.y * s), ph - ch),   // push the rect off the frame
-            width: cw, height: ch,
-          };
-        }
-        const png = await renderCroppedPng(base, crop);
-        // Shown OVER this screen rather than pushed as a route. Only the top route
-        // is rendered, so pushing would unmount this screen and take the picked
-        // images, the slot queue and the crop with it — and the cut-out would come
-        // back to a component that no longer exists.
-        setCutout({ uri: png, itemId: it.id });
-      } catch (e: any) {
-        Alert.alert('Could not open the background editor', String(e?.message || e));
-      } finally {
-        if (temp) await deleteFile(temp);
-        setBusy(false);
-        setProgress(null);
-      }
-    };
-    // Only the first frame survives a cut-out, so say so before doing it.
-    if (it.video || it.maybeAnimated) {
-      Alert.alert('This one moves', 'Removing the background keeps only the frame you see — the sticker becomes a still image.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Continue', onPress: go },
-      ]);
-    } else { go(); }
-  };
-
-  const stickerOptions = (it: Item) => {
-    const isVideo = !!it.video;
-    Alert.alert(isVideo ? 'Clip options' : 'Sticker options', undefined, [
-      ...(canCutout ? [{
-        text: it.cut ? 'Edit the background again' : 'Remove background…',
-        onPress: () => openCutout(it),
-      }] : []),
-      ...(isVideo ? (Object.keys(QUALITY) as QualityKey[]).map((k) => ({
+  // Only the choices that must be made BEFORE the file is encoded live here.
+  // Everything you can still change afterwards — background, emoji, pack icon,
+  // cropping again — belongs to the sticker screen, which is the one place a
+  // sticker is edited whether you just made it or made it last week.
+  const clipOptions = () => {
+    Alert.alert('Clip options', undefined, [
+      ...(Object.keys(QUALITY) as QualityKey[]).map((k) => ({
         text: tick(quality === k, QUALITY[k].label),
         onPress: () => { setQuality(k); dropPreview(); },
-      })) : []),
-      ...(isVideo ? [{
+      })),
+      {
         text: tick(optimize, 'Smaller file size'),
         onPress: () => { setOptimize((v) => !v); dropPreview(); },
-      }] : []),
+      },
       { text: 'Done', style: 'cancel' as const },
     ]);
   };
+
+  // Dragging the freeform corner. The window stays centred in its box, so the
+  // opposite edge moves with it and the finger travels half of each size change.
+  // The gesture is built once and reads through refs, so it is never swapped out
+  // mid-drag.
+  const freeRef = useRef(free);
+  useEffect(() => { freeRef.current = free; }, [free]);
+
+  const beginCorner = useCallback(() => { freeStart.current = { ...freeRef.current }; }, []);
+  const setFreeSize = useCallback((w: number, h: number) => {
+    const clamp = (v: number) => Math.min(Math.max(v, FREE_MIN), BOX);
+    setFree({ w: clamp(w), h: clamp(h) });
+    setPreview((p) => { if (p) deleteFile(p.uri); return null; });
+  }, []);
+
+  const cornerGesture = React.useMemo(() => Gesture.Pan()
+    .onBegin(() => { 'worklet'; runOnJS(beginCorner)(); })
+    .onUpdate((e) => {
+      'worklet';
+      runOnJS(setFreeSize)(
+        freeStart.current.w + e.translationX * 2,
+        freeStart.current.h + e.translationY * 2,
+      );
+    }), [beginCorner, setFreeSize]);
 
   // Render the clip for real and show it, rather than promising what it will look
   // like. It is the same call the save path makes, so what you watch is the file
@@ -312,23 +288,21 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   };
 
   // One muted line summarising whatever is switched on.
-  const optionsSummary = (it: Item) => {
-    const bits: string[] = [];
-    if (it.video) bits.push(QUALITY[quality].label);
-    if (it.video && optimize) bits.push('smaller file');
-    if (it.cut) bits.push('background removed');
-    return bits.length ? bits.join(' · ') : 'Options';
-  };
+  const optionsSummary = () =>
+    [QUALITY[quality].label, optimize ? 'smaller file' : null].filter(Boolean).join(' · ');
 
   // A sticker is always delivered on a 512×512 canvas — WhatsApp and Telegram
   // both insist — so "keep the original shape" means the picture keeps its ratio
   // and the canvas fills out around it with transparency, which is what every
   // renderer here already does with a non-square crop (fitSize, 'contain').
-  const arOf = (it: Item) => customAr ?? (aspect === 'original' ? it.w / it.h : 1);
+  const arOf = (it: Item) =>
+    aspect === 'free' ? free.w / free.h
+      : customAr ?? (aspect === 'original' ? it.w / it.h : 1);
   // Deliberately NOT rounded: vw/vh has to equal the ratio exactly, or re-cropping
   // a sticker cannot reproduce the rect it was made with. React Native lays out
   // fractional points fine.
   const viewBox = (it: Item) => {
+    if (aspect === 'free') return { vw: free.w, vh: free.h };
     const ar = arOf(it);
     return ar >= 1 ? { vw: BOX, vh: BOX / ar } : { vw: BOX * ar, vh: BOX };
   };
@@ -452,7 +426,7 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
     if (!editStickerId) return;
     const crop = cropRect(it, centered);
     let tmp: string | null = null;
-    if (it.maybeAnimated && !it.cut) {
+    if (it.maybeAnimated) {
       try {
         tmp = await renderCroppedGif(it.uri, crop, (done, total) => {
           if (done % 5 === 0 || done === total) setProgress(`animating · frame ${done}/${total}`);
@@ -520,25 +494,6 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
     finally { setBusy(false); }
   };
 
-  const autoCentreAll = async () => {
-    if (!items || busy) return;
-    setBusy(true);
-    try {
-      if (editing) {
-        await reRender(items[index], true);
-        nav.pop();
-        return;
-      }
-      let made: { id: string; packId: string } | null = null;
-      for (let i = index; i < items.length; i++) {
-        setIndex(i); // keep the "n / total" counter honest during the batch
-        made = await renderAndStore(items[i], true);
-      }
-      if (made && items.length === 1 && !splitsRef.current.length) await openMade(made);
-      else finish();
-    } catch (e: any) { Alert.alert('Failed', String(e?.message || e)); }
-    finally { setBusy(false); }
-  };
 
   if (!items) {
     return (
@@ -555,9 +510,9 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
-      <Header title={editing ? 'Crop again' : `Crop for ${packName}`} onBack={busy ? undefined : nav.pop}
-        right={<NavText label={items.length > 1 ? 'Centre all' : 'Centre'}
-          onPress={autoCentreAll} disabled={busy} />} />
+      {/* Nothing in the navigation bar saves anything: the only action up here is
+          leaving. Centring is a change to the framing, so it sits with the picture. */}
+      <Header title={editing ? 'Crop again' : `Crop for ${packName}`} onBack={busy ? undefined : nav.pop} />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
         <Text style={[S.hint, { textAlign: 'center', marginBottom: 10 }]}>
           {busy && progress ? progress
@@ -582,6 +537,19 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
               </View>
             </Pressable>
           ) : null}
+
+          {/* Freeform: drag the corner to shape the window itself. The window is
+              centred, so the opposite edge moves with it — hence the doubling. */}
+          {aspect === 'free' && !preview ? (
+            <GestureDetector gesture={cornerGesture}>
+              <View style={[st.handle, {
+                left: BOX / 2 + vw / 2 - HANDLE / 2,
+                top: BOX / 2 + vh / 2 - HANDLE / 2,
+              }]}>
+                <Ionicons name="resize" size={16} color={C.ink} />
+              </View>
+            </GestureDetector>
+          ) : null}
         </View>
 
         {/* Shape sits with the picture, not buried in a sheet: it changes what you
@@ -589,10 +557,17 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         <View style={[st.clipHead, { paddingHorizontal: EDGE, marginTop: 14 }]}>
           <Text style={st.fpsLabel}>Shape</Text>
           <View style={st.lengths}>
-            {([['square', 'Square'], ['original', 'Original']] as const).map(([v, label]) => {
+            {([['square', 'Square'], ['original', 'Original'], ['free', 'Freeform']] as const).map(([v, label]) => {
               const on = customAr == null && aspect === v;
               return (
-                <Pressable key={v} onPress={() => { setAspect(v); setCustomAr(null); resetTransform(); dropPreview(); }}
+                <Pressable
+                  key={v}
+                  onPress={() => {
+                    // Freeform starts from the shape currently on screen, so picking
+                    // it changes nothing until the corner is actually dragged.
+                    if (v === 'free') { const b = viewBox(cur); setFree({ w: b.vw, h: b.vh }); }
+                    setAspect(v); setCustomAr(null); resetTransform(); dropPreview();
+                  }}
                   style={[st.length, on && st.lengthOn]}>
                   <Text style={[st.lengthTxt, on && st.lengthTxtOn]}>{label}</Text>
                 </Pressable>
@@ -660,9 +635,9 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         ) : null}
 
         {/* Same single line for stills and clips — one place for every choice. */}
-        {canCutout || cur.video ? (
-          <Pressable onPress={() => stickerOptions(cur)} style={st.optionsRow} disabled={busy}>
-            <Text style={st.optionsTxt}>{optionsSummary(cur)}</Text>
+        {cur.video ? (
+          <Pressable onPress={clipOptions} style={st.optionsRow} disabled={busy}>
+            <Text style={st.optionsTxt}>{optionsSummary()}</Text>
             <Ionicons name="chevron-forward" size={15} color={C.muted} />
           </Pressable>
         ) : null}
@@ -676,26 +651,13 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         <View style={{ paddingHorizontal: EDGE, marginTop: 20, gap: 10 }}>
           <Btn label={editing ? 'Save' : isLast ? 'Save & Finish' : 'Save & Next'}
             onPress={saveAndNext} busy={busy} />
-          <Btn label="Reset" kind="ghost" onPress={resetTransform} disabled={busy} />
+          {/* Centring is just the framing going back to the middle at full size —
+              it saves nothing, which is why it is a plain secondary button. */}
+          <Btn label="Centre" kind="ghost"
+            onPress={() => { resetTransform(); dropPreview(); }} disabled={busy} />
         </View>
       </ScrollView>
 
-      {/* The cut-out replaces this item's source outright: it comes back already
-          square and already cropped, so every path below it carries on unchanged. */}
-      {cutout ? (
-        <View style={StyleSheet.absoluteFill}>
-          <CutoutScreen
-            uri={cutout.uri}
-            nav={{ ...nav, pop: () => { deleteFile(cutout.uri); setCutout(null); } }}
-            onDone={(file) => {
-              setItems((prev) => prev && prev.map((x) => (x.id === cutout.itemId
-                ? { id: x.id, uri: file, w: STICKER_SIZE, h: STICKER_SIZE, maybeAnimated: false, cut: true }
-                : x)));
-              resetTransform();
-            }}
-          />
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -722,6 +684,11 @@ const st = StyleSheet.create({
     borderRadius: 999, backgroundColor: 'rgba(10,12,18,0.72)',
   },
   previewTagTxt: { color: C.text, fontSize: 12, fontWeight: '600' },
+  handle: {
+    position: 'absolute', width: HANDLE, height: HANDLE, borderRadius: HANDLE / 2,
+    backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: C.bg,
+  },
   lengthOn: { backgroundColor: C.accent },
   lengthTxt: { color: C.text, fontSize: 13, fontWeight: '600' },
   lengthTxtOn: { color: C.ink },

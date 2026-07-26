@@ -1,7 +1,8 @@
 // Where a new sticker comes from. 'photos' covers GIFs too — iOS hands them back
 // as images and the app detects the animation itself; there is no GIF-only filter
 // in the system picker, so 'files' is the way in for a GIF that isn't in Photos.
-export type MediaSource = 'photos' | 'videos' | 'files';
+// 'mixed' restricts nothing, for picking a run of photos and clips in one go.
+export type MediaSource = 'photos' | 'videos' | 'mixed' | 'files';
 
 export type Route =
   | { name: 'packs' }
