@@ -3,12 +3,13 @@ name: iOS build
 # Builds a signed ad-hoc .ipa on GitHub's macOS runners (free for public repos)
 # and publishes an install page you can open on the iPhone. No Mac required
 # locally, and no dependency on EAS's build quota.
+#
+# Manual now that TestFlight is the normal way the app gets onto the phone. Kept
+# because it is the faster of the two — no processing wait at Apple's end — and
+# because it is the way back in if anything on the TestFlight side breaks.
 
 on:
   workflow_dispatch:
-  push:
-    branches: [master, main]
-    paths-ignore: ['**.md', 'LICENSE']
 
 concurrency:
   group: ios-build

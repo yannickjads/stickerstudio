@@ -1,18 +1,24 @@
 name: TestFlight
 
-# Uploads a build to TestFlight. Deliberately manual: the ad-hoc pipeline in
-# ios.yml is what runs on every push, and every TestFlight upload consumes a
-# build number in App Store Connect that can never be reused.
+# Uploads a build to TestFlight on every push — this is the channel the app is
+# installed from. ios.yml still builds the ad-hoc .ipa behind the install link,
+# but only when asked: that route is the fallback for when something needs to be
+# on the phone in five minutes instead of waiting for Apple to process a build.
 #
 # Same certificate as ios.yml — only the provisioning profile and the export
 # method differ (app-store instead of ad-hoc, so no device list is baked in).
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'LICENSE', 'docs/**']
 
 concurrency:
   group: testflight
-  cancel-in-progress: false   # never abandon a half-finished upload
+  # Never abandon a half-finished upload: pushes queue instead of cancelling, so
+  # a run that is already talking to Apple always gets to finish.
+  cancel-in-progress: false
 
 jobs:
   upload:
