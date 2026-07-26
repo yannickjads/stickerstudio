@@ -11,6 +11,10 @@ import { STICKER_SIZE } from './renderCrop';
 // summed delays) so they keep their full duration instead of being cut short.
 export const MAX_GIF_FRAMES = 100;
 const MAX_SOURCE_FRAMES = 600; // hard stop for absurd inputs
+// WhatsApp rejects an animated sticker longer than ten seconds, and an imported
+// GIF is under no obligation to be shorter. Stop at the ceiling rather than
+// producing a sticker that cannot be sent anywhere.
+export const MAX_ANIM_MS = 10000;
 
 // Returns the uri of a temp .gif, or null when the source isn't actually animated
 // (0-1 frames) — the caller then falls back to the static PNG path.
@@ -38,6 +42,7 @@ export async function renderCroppedGif(
     let held: Uint8Array | null = null;
     let heldDelay = 0;
     let written = 0;
+    let elapsed = 0;
 
     const flushHeld = () => {
       if (held) { enc.addFrame(held, heldDelay); written++; held = null; heldDelay = 0; }
@@ -62,6 +67,8 @@ export async function renderCroppedGif(
         }
       }
       heldDelay += delay;
+      elapsed += delay;
+      if (elapsed >= MAX_ANIM_MS) break; // ten seconds is the ceiling everywhere
       if (i < total - 1 && anim.decodeNextFrame() < 0) break; // corrupt/truncated source
       // Encoding is heavy, synchronous JS (slower on Hermes than Node) — yield every
       // couple of frames so the UI thread's JS side stays alive and can show progress.

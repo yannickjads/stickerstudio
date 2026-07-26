@@ -9,6 +9,9 @@ const TRAY = /(^|\/)(tray|cover|icon|thumb\w*)[^/]*$/i;
 // importing those would double the pack and fill half of it with garbage.
 const JUNK = /(^|\/)(__MACOSX\/|\.)/;
 
+// The same three tests, used to FIND the tray rather than to exclude it.
+export const isTrayFile = (name: string) => IMAGE.test(name) && TRAY.test(name) && !JUNK.test(name);
+
 /**
  * Every sticker image in a pack archive, in the order they should be laid out.
  *

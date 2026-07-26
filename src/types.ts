@@ -3,6 +3,8 @@ export type Pack = {
   name: string;
   author: string;
   coverStickerId: string | null;
+  // The pack's own tray image, when it has one instead of borrowing a sticker.
+  trayUri?: string | null;
   sortIndex: number;
   createdAt: number;
   updatedAt: number;

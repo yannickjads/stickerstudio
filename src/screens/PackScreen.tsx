@@ -6,15 +6,19 @@ import { Ionicons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { C } from '../theme';
 import { Btn, Header, NavCircle, S, EDGE } from '../ui';
 import type { Nav, MediaSource } from '../nav';
 import type { Pack, Sticker } from '../types';
 import { PACK_MAX } from '../types';
 import {
-  listStickers, getPack, ensurePackSlots, updatePack, deletePack, getPackCoverSticker,
+  listStickers, getPack, ensurePackSlots, updatePack, deletePack, getPackTrayUri,
+  setPackTrayImage,
 } from '../db';
 import { nativePrompt } from '../../modules/native-prompt';
+import { deleteFile } from '../storage';
+import { renderCroppedPng, ensureDecodableUri, loadSkImage } from '../editor/renderCrop';
 import { buildWhatsAppPayload, isAnimatedSticker, WA_MIN_STICKERS } from '../editor/whatsappExport';
 import { exportPacksToZip } from '../backup';
 import { exportWastickers } from '../wastickers';
@@ -58,7 +62,8 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
   }, [packId, nav]);
   useEffect(() => { load(); }, [load]);
 
-  const isCover = (s: Sticker) => pack?.coverStickerId === s.id;
+  // With a tray image of its own, no sticker is the icon — the star would lie.
+  const isCover = (s: Sticker) => !pack?.trayUri && pack?.coverStickerId === s.id;
 
   // Tapping a sticker opens it. Everything you can do to one sticker lives there,
   // including cropping it again and removing its background.
@@ -75,9 +80,9 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     }
     setWaBusy(true);
     try {
-      const cover = await getPackCoverSticker(packId);
+      const tray = await getPackTrayUri(packId);
       const { json, animatedAsStill } = await buildTelegramPayload(
-        pack, stickers, (done, total) => setWaProgress(`${done}/${total}`), cover?.uri,
+        pack, stickers, (done, total) => setWaProgress(`${done}/${total}`), tray ?? undefined,
       );
       setWaProgress(null);
       const ok = await sendStickerSetToTelegram(json);
@@ -120,10 +125,10 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     const animated = stickers.some(isAnimatedSticker);
     setWaBusy(true);
     try {
-      const cover = await getPackCoverSticker(packId);
+      const tray = await getPackTrayUri(packId);
       const json = await buildWhatsAppPayload(pack, stickers.slice(0, PACK_MAX), animated, (done, total) => {
         setWaProgress(`${done}/${total}`);
-      }, cover?.uri);
+      }, tray ?? undefined);
       setWaProgress(null);
       const ok = await sendStickerPackToWhatsApp(json);
       if (!ok) Alert.alert('Could not open WhatsApp', 'Is WhatsApp installed on this phone?');
@@ -147,6 +152,41 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
       Alert.alert('Saved', `${stickers.length} sticker${stickers.length > 1 ? 's' : ''} saved to your Photos.`);
     } catch (e: any) { Alert.alert('Save failed', String(e?.message || e)); }
     finally { setBusy(false); }
+  };
+
+  // The pack's own tray image. Centre-cropped without asking: it is shown at 96px
+  // in every app that reads it, so an interactive crop would be ceremony for
+  // nothing — and it can be replaced in two taps.
+  const chooseTray = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+    if (res.canceled || !res.assets?.length) return;
+    setBusy(true);
+    let src = '';
+    let png = '';
+    try {
+      src = await ensureDecodableUri(res.assets[0].uri);
+      const im = await loadSkImage(src);
+      const w = im.width(), h = im.height();
+      im.dispose();
+      const side = Math.min(w, h);
+      png = await renderCroppedPng(src, {
+        x: Math.round((w - side) / 2), y: Math.round((h - side) / 2), width: side, height: side,
+      });
+      await setPackTrayImage(packId, png);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      load();
+    } catch (e: any) {
+      Alert.alert('Could not set the pack icon', String(e?.message || e));
+    } finally {
+      if (png) await deleteFile(png);
+      if (src && src !== res.assets[0].uri) await deleteFile(src);
+      setBusy(false);
+    }
+  };
+
+  const clearTray = async () => {
+    await setPackTrayImage(packId, null);
+    load();
   };
 
   const editPack = async () => {
@@ -177,8 +217,8 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     if (!pack || busy) return;
     setBusy(true);
     try {
-      const cover = await getPackCoverSticker(packId);
-      const file = await exportWastickers(pack, stickers, cover?.uri);
+      const tray = await getPackTrayUri(packId);
+      const file = await exportWastickers(pack, stickers, tray ?? undefined);
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file);
     } catch (e: any) { Alert.alert('Export failed', String(e?.message || e)); }
     finally { setBusy(false); }
@@ -191,6 +231,11 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     // export actions depend on there being stickers.
     Alert.alert(name, pack?.author ? `by ${pack.author}` : undefined, [
       { text: 'Edit name & author', onPress: editPack },
+      {
+        text: pack?.trayUri ? 'Change pack icon…' : 'Pack icon from a photo…',
+        onPress: chooseTray,
+      },
+      ...(pack?.trayUri ? [{ text: 'Use a sticker as the icon instead', onPress: clearTray }] : []),
       ...(hasStickers ? [
         { text: 'Back up pack (.zip)', onPress: exportPack },
         { text: 'Add to Telegram', onPress: sendToTelegram },

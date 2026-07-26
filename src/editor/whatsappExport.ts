@@ -6,6 +6,7 @@ import { Skia, ImageFormat, type SkImage } from '@shopify/react-native-skia';
 import type { Pack, Sticker } from '../types';
 import { loadSkImage } from './renderCrop';
 import { muxAnimatedWebp, base64ToBytes, bytesToBase64, type WebpFrame } from './webpMux';
+import { MAX_ANIM_MS } from './renderAnimated';
 
 const STATIC_LIMIT = 100 * 1024;
 const ANIM_LIMIT = 500 * 1024;
@@ -67,6 +68,18 @@ export async function animatedWebpBase64(uri: string): Promise<string> {
       if (i % 4 === 3) await new Promise((r) => setTimeout(r, 0));
     }
     if (frames.length < 2) throw new Error('Not animated.');
+    // Ten seconds is WhatsApp's ceiling. Our own renders already respect it, but a
+    // sticker imported from another app's pack is stored byte-for-byte and can be
+    // any length, so trim here too rather than hand over something it will refuse.
+    let ms = 0, keep = 0;
+    while (keep < frames.length && ms + frames[keep].delayMs <= MAX_ANIM_MS) {
+      ms += frames[keep].delayMs;
+      keep++;
+    }
+    if (keep >= 2 && keep < frames.length) {
+      for (let i = keep; i < frames.length; i++) frames[i].img.dispose();
+      frames.length = keep;
+    }
     try {
       const attempts: { q: number; step: number }[] = [
         { q: 80, step: 1 }, { q: 60, step: 1 }, { q: 40, step: 1 }, { q: 40, step: 2 }, { q: 25, step: 2 },

@@ -4,7 +4,7 @@ import type { Pack, Sticker, Asset, EditorDocument } from './types';
 import { PACK_MAX } from './types';
 import { newId, saveRender, saveAsset, deleteRender, deleteFile, toAbs, toRel } from './storage';
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 // Rows store paths relative to the studio dir (see storage.ts) — resolve on read.
 const mapSticker = (s: Sticker): Sticker => ({ ...s, uri: toAbs(s.uri), animated: !!s.animated });
@@ -99,6 +99,12 @@ function db(): Promise<SQLite.SQLiteDatabase> {
         await addColumn(d, 'stickers', 'animated', 'INTEGER NOT NULL DEFAULT 0');
         await d.execAsync(`UPDATE stickers SET animated = 1 WHERE lower(uri) LIKE '%.gif'`);
       }
+      if (version < 7) {
+        // v7: the tray icon is its own image in every sticker format that has one —
+        // a pack of 30 shouldn't have to spend a slot on its own thumbnail. Null
+        // means "use a sticker", which is what every existing pack does.
+        await addColumn(d, 'packs', 'trayUri', 'TEXT');
+      }
       await d.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
       return d;
     })().catch((e) => {
@@ -125,18 +131,24 @@ export async function listPacks(): Promise<Pack[]> {
     SELECT p.*,
       (SELECT COUNT(*) FROM stickers s WHERE s.packId = p.id) AS count,
       COALESCE(
+        p.trayUri,
         (SELECT sc.uri FROM stickers sc WHERE sc.id = p.coverStickerId AND sc.packId = p.id),
         (SELECT s2.uri FROM stickers s2 WHERE s2.packId = p.id ORDER BY s2.${ORDER} LIMIT 1)
       ) AS cover
     FROM packs p
     ORDER BY p.${ORDER}
   `);
-  return rows.map((p) => ({ ...p, cover: p.cover ? toAbs(p.cover) : null }));
+  return rows.map((p) => ({
+    ...p,
+    cover: p.cover ? toAbs(p.cover) : null,
+    trayUri: p.trayUri ? toAbs(p.trayUri) : null,
+  }));
 }
 
 export async function getPack(id: string): Promise<Pack | null> {
   const d = await db();
-  return (await d.getFirstAsync<Pack>(`SELECT * FROM packs WHERE id=?`, [id])) ?? null;
+  const p = await d.getFirstAsync<Pack>(`SELECT * FROM packs WHERE id=?`, [id]);
+  return p ? { ...p, trayUri: p.trayUri ? toAbs(p.trayUri) : null } : null;
 }
 
 export async function createPack(name: string, author = ''): Promise<Pack> {
@@ -169,6 +181,39 @@ export async function setPackCover(packId: string, stickerId: string | null): Pr
     [stickerId, Date.now(), packId]);
 }
 
+/**
+ * Give the pack its own tray image, independent of its stickers. Every sticker
+ * format that has a tray icon treats it as a separate picture — a pack of thirty
+ * should not have to spend one of its thirty slots on its own thumbnail.
+ * Passing null goes back to using a sticker.
+ */
+export async function setPackTrayImage(packId: string, tempUri: string | null): Promise<void> {
+  const d = await db();
+  const prev = await d.getFirstAsync<{ trayUri: string | null }>(
+    `SELECT trayUri FROM packs WHERE id=?`, [packId],
+  );
+  const stored = tempUri ? await saveRender(tempUri, newId()) : null;
+  try {
+    await d.runAsync(`UPDATE packs SET trayUri=?, updatedAt=? WHERE id=?`,
+      [stored ? toRel(stored) : null, Date.now(), packId]);
+  } catch (e) {
+    if (stored) await deleteRender(stored);
+    throw e;
+  }
+  if (prev?.trayUri) await deleteRender(toAbs(prev.trayUri));
+}
+
+// What the pack's icon should actually be drawn from: its own tray image if it has
+// one, otherwise whichever sticker stands in for it.
+export async function getPackTrayUri(packId: string): Promise<string | null> {
+  const d = await db();
+  const p = await d.getFirstAsync<{ trayUri: string | null }>(
+    `SELECT trayUri FROM packs WHERE id=?`, [packId],
+  );
+  if (p?.trayUri) return toAbs(p.trayUri);
+  return (await getPackCoverSticker(packId))?.uri ?? null;
+}
+
 // Sticker to use as the pack's icon: the chosen one, else the first in the pack.
 // Deliberately two plain queries rather than a JOIN — joining packs and stickers
 // makes `createdAt` (and `id`) ambiguous in the shared ORDER clause.
@@ -198,11 +243,13 @@ export async function updatePack(id: string, name: string, author: string): Prom
 export async function deletePack(id: string): Promise<void> {
   const d = await db();
   const stickers = await d.getAllAsync<Sticker>(`SELECT uri, documentId FROM stickers WHERE packId=?`, [id]);
+  const pack = await d.getFirstAsync<{ trayUri: string | null }>(`SELECT trayUri FROM packs WHERE id=?`, [id]);
   await d.runAsync(`DELETE FROM packs WHERE id=?`, [id]); // stickers cascade
   for (const s of stickers) {                              // best-effort file + doc/asset cleanup
     await deleteRender(toAbs(s.uri));
     await deleteDocumentAndAssets(s.documentId);
   }
+  if (pack?.trayUri) await deleteRender(toAbs(pack.trayUri));
 }
 
 export async function duplicatePack(id: string): Promise<Pack> {

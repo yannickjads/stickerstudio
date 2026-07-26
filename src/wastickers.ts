@@ -6,14 +6,14 @@ import JSZip from 'jszip';
 import { File } from 'expo-file-system';
 import type { Pack, Sticker } from './types';
 import { PACK_MAX } from './types';
-import { addSticker, createPack, ensurePackSlots, deletePack } from './db';
+import { addSticker, createPack, ensurePackSlots, deletePack, setPackTrayImage } from './db';
 import { writeExport, writeTempBytes, deleteFile } from './storage';
 import {
   staticWebpBase64, animatedWebpBase64, trayPngBase64, isAnimatedSticker,
 } from './editor/whatsappExport';
 import { base64ToBytes } from './editor/webpMux';
 import { imageKind, isAnimatedBytes, extensionFor } from './editor/imageKind';
-import { stickerEntries } from './packArchive';
+import { stickerEntries, isTrayFile } from './packArchive';
 
 const safeName = (s: string) =>
   (s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pack').slice(0, 40);
@@ -94,6 +94,27 @@ export async function importWastickers(
   if (ok === 0) {
     await deletePack(pack.id);
     throw new Error('None of the stickers in that file could be read.');
+  }
+
+  // The tray icon travels with the pack and is NOT one of its stickers, so keep it
+  // as the pack's own icon rather than dropping it on the floor (or, worse,
+  // importing it as sticker 1 and spending a slot on it).
+  const trayName = Object.keys(zip.files)
+    .find((n) => !zip.files[n].dir && isTrayFile(n));
+  if (trayName) {
+    let tmp = '';
+    try {
+      const bytes = await zip.files[trayName].async('uint8array');
+      const kind = imageKind(bytes);
+      if (kind !== 'unknown') {
+        tmp = await writeTempBytes(bytes, extensionFor(kind));
+        await setPackTrayImage(pack.id, tmp);
+      }
+    } catch (e) {
+      console.warn('could not keep the pack icon from that file:', e);
+    } finally {
+      if (tmp) await deleteFile(tmp);
+    }
   }
   return { name: pack.name, stickers: ok, skipped, dropped: Math.max(0, entries.length - PACK_MAX) };
 }
