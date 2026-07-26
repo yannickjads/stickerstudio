@@ -259,9 +259,11 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
     .onBegin(() => { 'worklet'; runOnJS(beginCorner)(); })
     .onUpdate((e) => {
       'worklet';
+      // The handle is the TOP-right corner, so dragging UP has to make the window
+      // taller — hence the minus on Y.
       runOnJS(setFreeSize)(
         freeStart.current.w + e.translationX * 2,
-        freeStart.current.h + e.translationY * 2,
+        freeStart.current.h - e.translationY * 2,
       );
     }), [beginCorner, setFreeSize]);
 
@@ -539,14 +541,16 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
           ) : null}
 
           {/* Freeform: drag the corner to shape the window itself. The window is
-              centred, so the opposite edge moves with it — hence the doubling. */}
+              centred, so the opposite edge moves with it — hence the doubling.
+              Top-right rather than bottom-right: down there it sits under your own
+              thumb and crowds the buttons directly beneath the picture. */}
           {aspect === 'free' && !preview ? (
             <GestureDetector gesture={cornerGesture}>
               <View style={[st.handle, {
                 left: BOX / 2 + vw / 2 - HANDLE / 2,
-                top: BOX / 2 + vh / 2 - HANDLE / 2,
+                top: BOX / 2 - vh / 2 - HANDLE / 2,
               }]}>
-                <Ionicons name="resize" size={16} color={C.ink} />
+                <Ionicons name="resize" size={16} color={C.ink} style={st.handleIcon} />
               </View>
             </GestureDetector>
           ) : null}
@@ -689,6 +693,9 @@ const st = StyleSheet.create({
     backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: C.bg,
   },
+  // The glyph's arrows run north-west to south-east; rotating it points them along
+  // the corner it actually sits on.
+  handleIcon: { transform: [{ rotate: '90deg' }] },
   lengthOn: { backgroundColor: C.accent },
   lengthTxt: { color: C.text, fontSize: 13, fontWeight: '600' },
   lengthTxtOn: { color: C.ink },
