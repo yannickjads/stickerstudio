@@ -8,18 +8,28 @@ import { createGifEncoder, buildPalette } from './gifEncode';
 import { loadSkImage, STICKER_SIZE } from './renderCrop';
 import { writeTempBytes, deleteFile } from '../storage';
 
-// Named the way the choice actually feels, not by frame rate.
+// How many colours the shared palette gets. Frame rate is chosen separately —
+// they trade off against each other and against length, and which one to spend
+// the budget on depends entirely on the clip.
 export type QualityKey = 'smooth' | 'balanced' | 'small';
-export const QUALITY: Record<QualityKey, { fps: number; colors: number; label: string }> = {
-  smooth: { fps: 15, colors: 256, label: 'Smooth' },
-  balanced: { fps: 10, colors: 128, label: 'Balanced' },
-  small: { fps: 8, colors: 64, label: 'Small' },
+export const QUALITY: Record<QualityKey, { colors: number; label: string }> = {
+  smooth: { colors: 256, label: 'Best colours' },
+  balanced: { colors: 128, label: 'Balanced' },
+  small: { colors: 64, label: 'Smallest' },
 };
 
-// WhatsApp animated stickers must stay under 500 KB and 3 s is the practical
-// ceiling on every platform, so the clip length is capped rather than trusted.
-export const MAX_CLIP_MS = 3000;
-const MAX_FRAMES = 60;
+export const FPS_CHOICES = [8, 10, 12, 15, 20] as const;
+export const DEFAULT_FPS = 12;
+
+// WhatsApp's own limit for an animated sticker, from its third-party pack spec:
+// 512x512, at most 10 seconds, and at most 500 KB. The length is the generous
+// one — the 500 KB is what actually bites, so the app reports the real size of
+// what it produced rather than guessing in advance.
+export const MAX_CLIP_MS = 10000;
+export const MAX_STICKER_BYTES = 500 * 1024;
+// Encoding is synchronous JS, so this is a wall-clock ceiling as much as anything:
+// 150 frames is 10s at 15fps, and already takes a while.
+const MAX_FRAMES = 150;
 
 // The crop is expressed in the video's own pixels, so it carries the size it was
 // measured against — extraction hands back smaller frames.
@@ -28,10 +38,11 @@ export type VideoCrop = Rect & { videoW: number; videoH: number };
 export async function renderVideoSticker(
   uri: string,
   crop: VideoCrop,
-  opts: { startMs: number; durationMs: number; quality: QualityKey; optimize?: boolean },
+  opts: { startMs: number; durationMs: number; quality: QualityKey; fps?: number; optimize?: boolean },
   onProgress?: (done: number, total: number) => void,
 ): Promise<string> {
-  const { fps, colors } = QUALITY[opts.quality];
+  const { colors } = QUALITY[opts.quality];
+  const fps = opts.fps ?? DEFAULT_FPS;
   const durationMs = Math.min(opts.durationMs, MAX_CLIP_MS);
   const count = Math.max(2, Math.min(MAX_FRAMES, Math.round((durationMs / 1000) * fps)));
 
@@ -87,6 +98,7 @@ export async function renderVideoSticker(
     }
     if (written < 2) throw new Error('That clip produced too few frames.');
     return writeTempBytes(enc.finish(), 'gif');
+
   } finally {
     for (const f of frames) await deleteFile(f);
   }

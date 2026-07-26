@@ -1,13 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Dimensions, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { Image } from 'expo-image';
+import { File } from 'expo-file-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSharedValue } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { C } from '../theme';
 import { Btn, Header, NavText, S } from '../ui';
-import type { Nav } from '../nav';
+import type { Nav, MediaSource } from '../nav';
 import type { EditorDocument } from '../types';
 import { DOC_SCHEMA_VERSION, PACK_MAX } from '../types';
 import {
@@ -18,7 +21,10 @@ import {
 import { deleteRender, deleteFile, newId } from '../storage';
 import { renderCroppedPng, ensureDecodableUri, loadSkImage, STICKER_SIZE } from '../editor/renderCrop';
 import { renderCroppedGif, maybeAnimatedSource } from '../editor/renderAnimated';
-import { renderVideoSticker, QUALITY, MAX_CLIP_MS, type QualityKey } from '../editor/renderVideo';
+import {
+  renderVideoSticker, QUALITY, MAX_CLIP_MS, MAX_STICKER_BYTES, FPS_CHOICES, DEFAULT_FPS,
+  type QualityKey,
+} from '../editor/renderVideo';
 import { videoInfo, extractFrames } from '../../modules/video-frames';
 import { cutoutSupported } from '../../modules/subject-cutout';
 import Cropper from '../SquareCropper';
@@ -35,7 +41,7 @@ const { width: SCREEN_W } = Dimensions.get('window');
 const BOX = Math.min(SCREEN_W - 44, 380);
 const EDGE = (SCREEN_W - BOX) / 2; // everything aligns to the crop box edges
 
-export default function CropScreen({ nav, packId, packName, startSlot, editStickerId }: { nav: Nav; packId: string; packName: string; startSlot?: number; editStickerId?: string }) {
+export default function CropScreen({ nav, packId, packName, startSlot, editStickerId, source = 'photos' }: { nav: Nav; packId: string; packName: string; startSlot?: number; editStickerId?: string; source?: MediaSource }) {
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<Item[] | null>(null);
   const [index, setIndex] = useState(0);
@@ -45,7 +51,17 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   const [startMs, setStartMs] = useState(0);       // clip start
   const [clipMs, setClipMs] = useState(MAX_CLIP_MS); // clip length
   const [quality, setQuality] = useState<QualityKey>('balanced');
+  const [fps, setFps] = useState<number>(DEFAULT_FPS);
   const [optimize, setOptimize] = useState(true);
+  // The rendered clip, exactly as it will be saved — same code path, same file.
+  // Any change to a setting drops it, so whatever is on screen is always current,
+  // and saving reuses the file instead of encoding the whole thing a second time.
+  const [preview, setPreview] = useState<{ uri: string; bytes: number } | null>(null);
+  const dropPreview = () => setPreview((p) => { if (p) deleteFile(p.uri); return null; });
+  // Shape of the crop. 'original' keeps the picture's own ratio; a sticker being
+  // re-cropped carries whatever ratio it was made with, as customAr.
+  const [aspect, setAspect] = useState<'square' | 'original'>('square');
+  const [customAr, setCustomAr] = useState<number | null>(null);
   const [canCutout, setCanCutout] = useState(false);
   // The background editor, shown over this screen (see openCutout).
   const [cutout, setCutout] = useState<{ uri: string; itemId: string } | null>(null);
@@ -96,9 +112,13 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         // Start from the crop the sticker already has — the inverse of cropRect —
         // so "Crop again" adjusts the framing instead of throwing it away.
         const c = 'crop' in layer ? layer.crop : null;
-        if (c && c.width > 0 && asset.width > 0 && asset.height > 0) {
-          const base = Math.max(BOX / asset.width, BOX / asset.height);
-          const eff = BOX / c.width;
+        if (c && c.width > 0 && c.height > 0 && asset.width > 0 && asset.height > 0) {
+          const ar = c.width / c.height;
+          setCustomAr(ar);
+          const vw = ar >= 1 ? BOX : Math.max(1, Math.round(BOX * ar));
+          const vh = ar >= 1 ? Math.max(1, Math.round(BOX / ar)) : BOX;
+          const base = Math.max(vw / asset.width, vh / asset.height);
+          const eff = vw / c.width;
           scale.value = Math.min(Math.max(eff / base, 1), 8);
           tx.value = eff * (asset.width / 2 - c.x - c.width / 2);
           ty.value = eff * (asset.height / 2 - c.y - c.height / 2);
@@ -117,19 +137,42 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
     if (editing || launched.current) return;
     launched.current = true;
     (async () => {
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images', 'videos'], allowsMultipleSelection: true, quality: 1,
-      });
-      if (res.canceled || !res.assets?.length) { nav.pop(); return; }
+      // A file picked out of Files has no dimensions attached, so it is measured
+      // once here; the photo picker supplies them.
+      type Picked = { uri: string; w: number; h: number; mime: string | null; video: boolean };
+      let picks: Picked[] = [];
+      if (source === 'files') {
+        const res = await DocumentPicker.getDocumentAsync({
+          type: ['public.image', 'com.compuserve.gif'], multiple: true, copyToCacheDirectory: true,
+        });
+        if (res.canceled || !res.assets?.length) { nav.pop(); return; }
+        for (const a of res.assets) {
+          let w = 512, h = 512;
+          try { const im = await loadSkImage(a.uri); w = im.width(); h = im.height(); im.dispose(); } catch {}
+          picks.push({ uri: a.uri, w, h, mime: a.mimeType ?? a.name ?? null, video: false });
+        }
+      } else {
+        const res = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: source === 'videos' ? ['videos'] : ['images'],
+          allowsMultipleSelection: true, quality: 1,
+        });
+        if (res.canceled || !res.assets?.length) { nav.pop(); return; }
+        picks = res.assets.map((a) => ({
+          uri: a.uri, w: a.width ?? 512, h: a.height ?? 512,
+          mime: a.mimeType ?? a.fileName ?? null,
+          video: a.type === 'video' || /\.(mov|mp4|m4v)$/i.test(a.uri),
+        }));
+      }
+
       const picked: Item[] = [];
-      for (let i = 0; i < res.assets.length; i++) {
-        const a = res.assets[i];
+      for (let i = 0; i < picks.length; i++) {
+        const a = picks[i];
         const item: Item = {
-          id: `${Date.now()}-${i}`, uri: a.uri, w: a.width ?? 512, h: a.height ?? 512,
-          maybeAnimated: maybeAnimatedSource(a.uri, a.mimeType ?? a.fileName ?? null),
+          id: `${Date.now()}-${i}`, uri: a.uri, w: a.w, h: a.h,
+          maybeAnimated: maybeAnimatedSource(a.uri, a.mime),
         };
         // A clip needs its length, plus a still to aim the cropper at.
-        if (a.type === 'video' || /\.(mov|mp4|m4v)$/i.test(a.uri)) {
+        if (a.video) {
           const info = await videoInfo(a.uri);
           if (info && info.durationMs > 0) {
             item.video = { durationMs: info.durationMs };
@@ -139,9 +182,10 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         }
         picked.push(item);
       }
+      if (!picked.length) { nav.pop(); return; }
       setItems(picked);
     })();
-  }, [nav]);
+  }, [nav, editing, source]);
 
   // A clip can be shorter than the chosen length.
   const effClip = (it: Item) => Math.min(clipMs, it.video?.durationMs ?? clipMs);
@@ -193,11 +237,14 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         let crop = c;
         if (s !== 1) {
           const pw = probeW, ph = Math.round(it.h * s);
-          const side = Math.max(1, Math.min(Math.round(c.width * s), pw, ph));
+          const cw = Math.max(1, Math.min(Math.round(c.width * s), pw));
+          // From the scaled width, not measured again: rounding both separately
+          // pulls a rect off its shape, and badly so when it is only a few pixels.
+          const ch = Math.max(1, Math.min(Math.round((cw * c.height) / c.width), ph));
           crop = {
-            x: Math.min(Math.round(c.x * s), pw - side),   // rounding must not
-            y: Math.min(Math.round(c.y * s), ph - side),   // push the rect off the frame
-            width: side, height: side,
+            x: Math.min(Math.round(c.x * s), pw - cw),   // rounding must not
+            y: Math.min(Math.round(c.y * s), ph - ch),   // push the rect off the frame
+            width: cw, height: ch,
           };
         }
         const png = await renderCroppedPng(base, crop);
@@ -232,14 +279,36 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
       }] : []),
       ...(isVideo ? (Object.keys(QUALITY) as QualityKey[]).map((k) => ({
         text: tick(quality === k, QUALITY[k].label),
-        onPress: () => setQuality(k),
+        onPress: () => { setQuality(k); dropPreview(); },
       })) : []),
       ...(isVideo ? [{
         text: tick(optimize, 'Smaller file size'),
-        onPress: () => setOptimize((v) => !v),
+        onPress: () => { setOptimize((v) => !v); dropPreview(); },
       }] : []),
       { text: 'Done', style: 'cancel' as const },
     ]);
+  };
+
+  // Render the clip for real and show it, rather than promising what it will look
+  // like. It is the same call the save path makes, so what you watch is the file
+  // that gets stored — including its size against WhatsApp's 500 KB ceiling.
+  const makePreview = async (it: Item) => {
+    if (!it.video || busy) return;
+    setBusy(true);
+    try {
+      const crop = cropRect(it, false);
+      const uri = await renderVideoSticker(
+        it.uri,
+        { ...crop, videoW: it.w, videoH: it.h },
+        { startMs, durationMs: effClip(it), quality, fps, optimize },
+        (done, total) => setProgress(`rendering · frame ${done}/${total}`),
+      );
+      dropPreview();
+      setPreview({ uri, bytes: new File(uri).size ?? 0 });
+      Haptics.selectionAsync();
+    } catch (e: any) {
+      Alert.alert('Preview failed', String(e?.message || e));
+    } finally { setBusy(false); setProgress(null); }
   };
 
   // One muted line summarising whatever is switched on.
@@ -251,22 +320,46 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
     return bits.length ? bits.join(' · ') : 'Options';
   };
 
-  // Integer square crop rect, fully inside the image.
+  // A sticker is always delivered on a 512×512 canvas — WhatsApp and Telegram
+  // both insist — so "keep the original shape" means the picture keeps its ratio
+  // and the canvas fills out around it with transparency, which is what every
+  // renderer here already does with a non-square crop (fitSize, 'contain').
+  const arOf = (it: Item) => customAr ?? (aspect === 'original' ? it.w / it.h : 1);
+  // Deliberately NOT rounded: vw/vh has to equal the ratio exactly, or re-cropping
+  // a sticker cannot reproduce the rect it was made with. React Native lays out
+  // fractional points fine.
+  const viewBox = (it: Item) => {
+    const ar = arOf(it);
+    return ar >= 1 ? { vw: BOX, vh: BOX / ar } : { vw: BOX * ar, vh: BOX };
+  };
+
+  // Integer crop rect of the chosen shape, fully inside the image.
   const cropRect = (it: Item, centered: boolean) => {
     const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+    const { vw, vh } = viewBox(it);
+    const ar = vw / vh;
+    // The height follows from the width rather than being measured separately:
+    // rounding the two independently pulls the rect off its shape, badly so when
+    // it is only a few dozen pixels across.
+    const heightFor = (cw: number) => clamp(Math.round(cw / ar), 1, it.h);
+
     if (centered) {
-      const side = Math.min(it.w, it.h);
-      return { x: Math.round((it.w - side) / 2), y: Math.round((it.h - side) / 2), width: side, height: side };
+      // The largest rect of this shape that fits, centred.
+      let cw = clamp(Math.min(it.w, Math.round(it.h * ar)), 1, it.w);
+      let ch = heightFor(cw);
+      if (ch > it.h) { ch = it.h; cw = clamp(Math.round(it.h * ar), 1, it.w); }
+      return { x: Math.round((it.w - cw) / 2), y: Math.round((it.h - ch) / 2), width: cw, height: ch };
     }
-    const base = Math.max(BOX / it.w, BOX / it.h);
+    const base = Math.max(vw / it.w, vh / it.h);
     const eff = base * scale.value;
     // The epsilon absorbs float error: seeding this from a stored crop makes eff
-    // exactly BOX/width, and BOX/eff then lands a hair BELOW the integer it should
+    // exactly vw/width, and vw/eff then lands a hair BELOW the integer it should
     // be, so a plain floor would shave a pixel off on every re-crop.
-    const side = Math.max(1, Math.min(Math.min(it.w, it.h), Math.floor(BOX / eff + 1e-6)));
-    const x = Math.round(clamp(it.w / 2 - (BOX / 2 + tx.value) / eff, 0, it.w - side));
-    const y = Math.round(clamp(it.h / 2 - (BOX / 2 + ty.value) / eff, 0, it.h - side));
-    return { x, y, width: side, height: side };
+    const cw = clamp(Math.floor(vw / eff + 1e-6), 1, it.w);
+    const ch = heightFor(cw);
+    const x = Math.round(clamp(it.w / 2 - (vw / 2 + tx.value) / eff, 0, it.w - cw));
+    const y = Math.round(clamp(it.h / 2 - (vh / 2 + ty.value) / eff, 0, it.h - ch));
+    return { x, y, width: cw, height: ch };
   };
 
   // No free slots left? Roll over into "<name> 2", "<name> 3", ... (same author).
@@ -314,10 +407,12 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
       // cropped identically and re-encoded as a looping GIF. Static -> flat PNG.
       let tmp: string | null = null;
       if (it.video) {
-        tmp = await renderVideoSticker(
+        // A preview is the finished file: nothing has changed since it was made,
+        // or it would have been dropped, so re-encoding it would be pure waiting.
+        tmp = preview?.uri ?? await renderVideoSticker(
           it.uri,
           { ...crop, videoW: it.w, videoH: it.h },
-          { startMs, durationMs: effClip(it), quality, optimize },
+          { startMs, durationMs: effClip(it), quality, fps, optimize },
           (done, total) => setProgress(`clip · frame ${done}/${total}`),
         );
         setProgress(null);
@@ -456,6 +551,7 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   const cur = items[index];
   const isLast = index >= items.length - 1;
   const willSplit = remaining != null && items.length - index > remaining;
+  const { vw, vh } = viewBox(cur);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
@@ -469,8 +565,41 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
             : `${index + 1} / ${items.length} · drag to move · pinch to zoom`}
         </Text>
 
-        <Cropper key={`${cur.id}-${cur.poster ?? ''}`} uri={cur.poster ?? cur.uri}
-          imgW={cur.w} imgH={cur.h} viewW={BOX} viewH={BOX} tx={tx} ty={ty} scale={scale} />
+        {/* The crop window takes the chosen shape; the box around it stays BOX tall
+            so nothing below it jumps when the shape changes. */}
+        <View style={{ width: BOX, height: BOX, alignSelf: 'center', alignItems: 'center', justifyContent: 'center' }}>
+          <Cropper key={`${cur.id}-${cur.poster ?? ''}-${vw}x${vh}`} uri={cur.poster ?? cur.uri}
+            imgW={cur.w} imgH={cur.h} viewW={vw} viewH={vh} tx={tx} ty={ty} scale={scale} />
+          {/* The finished clip, playing, over the cropper it came from. It also
+              covers the pan gesture, so the framing cannot drift away from what
+              is being shown. */}
+          {preview ? (
+            <Pressable style={[st.previewWrap, { width: vw, height: vh }]} onPress={dropPreview}>
+              <Image source={{ uri: preview.uri }} style={{ width: vw, height: vh }}
+                contentFit="contain" cachePolicy="none" />
+              <View style={st.previewTag}>
+                <Text style={st.previewTagTxt}>Tap to keep editing</Text>
+              </View>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {/* Shape sits with the picture, not buried in a sheet: it changes what you
+            are looking at. */}
+        <View style={[st.clipHead, { paddingHorizontal: EDGE, marginTop: 14 }]}>
+          <Text style={st.fpsLabel}>Shape</Text>
+          <View style={st.lengths}>
+            {([['square', 'Square'], ['original', 'Original']] as const).map(([v, label]) => {
+              const on = customAr == null && aspect === v;
+              return (
+                <Pressable key={v} onPress={() => { setAspect(v); setCustomAr(null); resetTransform(); dropPreview(); }}
+                  style={[st.length, on && st.lengthOn]}>
+                  <Text style={[st.lengthTxt, on && st.lengthTxtOn]}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
 
         {cur.video ? (
           <View style={st.clip}>
@@ -480,11 +609,11 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
                 {(startMs / 1000).toFixed(1)}–{((startMs + effClip(cur)) / 1000).toFixed(1)}s
               </Text>
               <View style={st.lengths}>
-                {[1000, 2000, 3000].map((ms) => {
+                {[1000, 2000, 3000, 5000, MAX_CLIP_MS].map((ms) => {
                   const on = clipMs === ms;
                   const can = cur.video!.durationMs >= ms;
                   return (
-                    <Pressable key={ms} onPress={() => can && setClipMs(ms)} disabled={!can}
+                    <Pressable key={ms} onPress={() => { if (can) { setClipMs(ms); dropPreview(); } }} disabled={!can}
                       style={[st.length, on && st.lengthOn]}>
                       <Text style={[st.lengthTxt, on && st.lengthTxtOn, !can && { opacity: 0.3 }]}>
                         {ms / 1000}s
@@ -500,10 +629,33 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
               min={0}
               max={Math.max(1, cur.video.durationMs - effClip(cur))}
               onChange={(v) => { setStartMs(v); schedulePoster(cur, v); }}
+              onStart={dropPreview}
             />
 
-            {/* The technical choices live one tap away, in a native sheet — the
-                same place every other choice in this app lives. */}
+            {/* Frame rate is its own choice: it trades against length and colours,
+                and which one to spend the 500 KB on depends on the clip. */}
+            <View style={st.clipHead}>
+              <Text style={st.fpsLabel}>Frames per second</Text>
+              <View style={st.lengths}>
+                {FPS_CHOICES.map((n) => (
+                  <Pressable key={n} onPress={() => { setFps(n); dropPreview(); }}
+                    style={[st.length, fps === n && st.lengthOn]}>
+                    <Text style={[st.lengthTxt, fps === n && st.lengthTxtOn]}>{n}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            <Btn label={preview ? 'Render again' : 'Preview'} kind="ghost"
+              onPress={() => makePreview(cur)} disabled={busy} />
+            {preview ? (
+              <Text style={[st.sizeNote, preview.bytes > MAX_STICKER_BYTES && { color: C.bad }]}>
+                {(preview.bytes / 1024).toFixed(0)} KB
+                {preview.bytes > MAX_STICKER_BYTES
+                  ? ` · over WhatsApp's 500 KB limit — fewer frames, fewer colours or a shorter clip`
+                  : " · fits WhatsApp's 500 KB limit"}
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -557,7 +709,19 @@ const st = StyleSheet.create({
     flexDirection: 'row', backgroundColor: C.surface2, borderRadius: 9,
     borderCurve: 'continuous', padding: 2,
   },
-  length: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 7, borderCurve: 'continuous' },
+  length: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 7, borderCurve: 'continuous' },
+  fpsLabel: { color: C.muted, fontSize: 14, fontWeight: '600' },
+  sizeNote: { color: C.muted, fontSize: 12, textAlign: 'center', lineHeight: 16, marginTop: -4 },
+  previewWrap: {
+    position: 'absolute', borderRadius: 14,
+    borderCurve: 'continuous', overflow: 'hidden', backgroundColor: C.surface2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  previewTag: {
+    position: 'absolute', bottom: 10, paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 999, backgroundColor: 'rgba(10,12,18,0.72)',
+  },
+  previewTagTxt: { color: C.text, fontSize: 12, fontWeight: '600' },
   lengthOn: { backgroundColor: C.accent },
   lengthTxt: { color: C.text, fontSize: 13, fontWeight: '600' },
   lengthTxtOn: { color: C.ink },

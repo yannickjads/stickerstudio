@@ -8,7 +8,7 @@ import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import { C } from '../theme';
 import { Btn, Header, NavCircle, S, EDGE } from '../ui';
-import type { Nav } from '../nav';
+import type { Nav, MediaSource } from '../nav';
 import type { Pack, Sticker } from '../types';
 import { PACK_MAX } from '../types';
 import {
@@ -91,7 +91,18 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     } finally { setWaBusy(false); setWaProgress(null); }
   };
 
-  const addAt = (slot: number) => nav.push({ name: 'crop', packId, packName: name, startSlot: slot });
+  // Ask what kind of sticker first, then show only that kind. Half of what this
+  // app can do was invisible when the picker just opened on everything at once.
+  const addAt = (slot: number) => {
+    const go = (source: MediaSource) =>
+      nav.push({ name: 'crop', packId, packName: name, startSlot: slot, source });
+    Alert.alert('New sticker', undefined, [
+      { text: 'From a photo or GIF', onPress: () => go('photos') },
+      { text: 'From a video', onPress: () => go('videos') },
+      { text: 'From a file', onPress: () => go('files') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
 
   const sendToWhatsApp = async () => {
     if (!pack || waBusy) return;

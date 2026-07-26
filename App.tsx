@@ -86,7 +86,7 @@ export default function App() {
             <PackScreen nav={nav} packId={route.packId} packName={route.packName} />
           ) : route.name === 'crop' ? (
             <CropScreen nav={nav} packId={route.packId} packName={route.packName}
-              startSlot={route.startSlot} editStickerId={route.editStickerId} />
+              startSlot={route.startSlot} editStickerId={route.editStickerId} source={route.source} />
           ) : route.name === 'sticker' ? (
             <StickerScreen nav={nav} stickerId={route.stickerId} packId={route.packId} packName={route.packName} />
           ) : route.name === 'cutout' ? (
