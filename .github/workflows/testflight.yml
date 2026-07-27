@@ -32,6 +32,9 @@ jobs:
     env:
       BUNDLE_ID: com.yannick.stickerstudio
       TEAM_ID: P46A3LB6LF
+      # Not a secret — it is on every App Store URL. Passing it explicitly is what
+      # lets the upload skip Apple's app-lookup endpoint entirely.
+      APPLE_ID: '6794895578'
 
     steps:
       - uses: actions/checkout@v4
@@ -171,24 +174,49 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           set -euo pipefail
+          xcrun altool --help 2>&1 | head -30 || true
           # altool looks for the key by name in this exact directory.
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$ASC_API_KEY_BASE64" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
           IPA=$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)
+          SHORT=$(node -p "require('./app.json').expo.version")
+          BUILD=$(node -p "require('./app.json').expo.ios.buildNumber")
 
-          # Apple's own API falls over from time to time — a run failed with six
-          # consecutive 500s from list-apps, which altool then reports as the
-          # useless "Cannot determine the Apple ID from Bundle ID". Nothing about
-          # the build was wrong, so retry rather than fail.
+          # --upload-app resolves the bundle id to an Apple ID by calling Apple's
+          # list-apps endpoint. That endpoint went down for a night and took every
+          # build with it, reported as the thoroughly misleading "Cannot determine
+          # the Apple ID from Bundle ID". --upload-package is handed the Apple ID
+          # and the versions outright, so it never makes that call.
+          #
+          # If this altool has no --upload-package, the first attempt says so and
+          # we drop back to --upload-app rather than guessing in advance.
+          MODE=package
+          upload_once() {
+            if [ "$MODE" = package ]; then
+              xcrun altool --upload-package "$IPA" --type ios \
+                --apple-id "$APPLE_ID" --bundle-id "$BUNDLE_ID" \
+                --bundle-version "$BUILD" --bundle-short-version-string "$SHORT" \
+                --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1
+            else
+              xcrun altool --upload-app -f "$IPA" -t ios \
+                --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1
+            fi
+          }
+
           ok=0
-          for attempt in 1 2 3; do
-            echo "--- upload attempt $attempt"
-            if OUT=$(xcrun altool --upload-app -f "$IPA" -t ios \
-                      --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1); then
+          for attempt in 1 2 3 4 5; do
+            echo "--- upload attempt $attempt (mode: $MODE)"
+            if OUT=$(upload_once); then
               echo "$OUT"; ok=1; break
             fi
             echo "$OUT"
+            # This altool predates --upload-package: switch and try again at once.
+            if [ "$MODE" = package ] && echo "$OUT" | grep -qiE "unrecognized|unknown option|^usage:|invalid option"; then
+              echo "--upload-package not supported here; falling back to --upload-app"
+              MODE=app
+              continue
+            fi
             # A build number Apple has already accepted is a success, not a retry:
             # trying again would only ever produce the same rejection.
             if echo "$OUT" | grep -qiE "already.*(used|exist)|redundant binary"; then
@@ -199,7 +227,7 @@ jobs:
               echo "::error::The binary itself was rejected — retrying would not help."
               break
             fi
-            [ "$attempt" -lt 3 ] && { echo "transient; waiting 90s"; sleep 90; }
+            [ "$attempt" -lt 5 ] && { echo "transient; waiting 120s"; sleep 120; }
           done
 
           rm -f ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
