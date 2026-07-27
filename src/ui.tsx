@@ -1,5 +1,7 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import {
+  View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, ActionSheetIOS, Alert,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { C } from './theme';
 
@@ -81,6 +83,51 @@ export function LargeHeader({ title, right }: { title: string; right?: React.Rea
       <Text style={S.largeTitle} numberOfLines={1}>{title}</Text>
       {right}
     </View>
+  );
+}
+
+export type SheetOption = {
+  label: string;
+  onPress?: () => void;
+  destructive?: boolean;
+};
+
+/**
+ * A real iOS action sheet — the panel that slides up from the bottom — rather
+ * than Alert.alert, which draws a centred box.
+ *
+ * The distinction is not decoration: an alert is for something the system needs
+ * to tell you, a sheet is for choosing between actions, and iOS users read the
+ * difference without thinking about it. Sheets also put the destructive choice
+ * in red and the cancel apart from the rest, both of which Alert cannot do with
+ * a list of buttons.
+ *
+ * Falls back to an alert off iOS, where ActionSheetIOS does not exist.
+ */
+export function sheet(opts: { title?: string; message?: string; options: SheetOption[] }) {
+  const { title, message, options } = opts;
+  if (Platform.OS !== 'ios') {
+    Alert.alert(title ?? '', message, [
+      ...options.map((o) => ({
+        text: o.label,
+        style: o.destructive ? ('destructive' as const) : undefined,
+        onPress: o.onPress,
+      })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+    return;
+  }
+  const labels = [...options.map((o) => o.label), 'Cancel'];
+  const destructive = options.findIndex((o) => o.destructive);
+  ActionSheetIOS.showActionSheetWithOptions(
+    {
+      title, message,
+      options: labels,
+      cancelButtonIndex: labels.length - 1,
+      ...(destructive >= 0 ? { destructiveButtonIndex: destructive } : {}),
+      userInterfaceStyle: 'dark',
+    },
+    (i) => { options[i]?.onPress?.(); },
   );
 }
 

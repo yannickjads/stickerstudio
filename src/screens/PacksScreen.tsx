@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { C } from '../theme';
-import { Btn, NavCircle, S, EDGE } from '../ui';
+import { Btn, NavCircle, S, EDGE, sheet } from '../ui';
 import type { Nav } from '../nav';
 import type { Pack } from '../types';
 import { PACK_MAX } from '../types';
@@ -124,11 +124,14 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
     // Version + build shown here so it's always obvious which build is installed.
     const v = appConfig.expo.version;
     const b = (appConfig.expo.ios as { buildNumber?: string }).buildNumber ?? 'dev';
-    Alert.alert('Sticker Studio', `Version ${v} (${b})`, [
-      { text: 'Back up all packs (.zip)', onPress: backUpAll },
-      { text: 'Import .wastickers or backup…', onPress: restore },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    sheet({
+      title: 'Sticker Studio',
+      message: `Version ${v} (${b})`,
+      options: [
+        { label: 'Back up all packs (.zip)', onPress: backUpAll },
+        { label: 'Import .wastickers or backup…', onPress: restore },
+      ],
+    });
   };
 
   // Alert onPress handlers are fire-and-forget: without this a repository error
@@ -139,18 +142,21 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   };
 
   const onMenu = (p: Pack) => {
-    Alert.alert(p.name, undefined, [
-      { text: 'Edit name & author', onPress: () => onEdit(p) },
-      { text: 'Duplicate', onPress: () => run(() => duplicatePack(p.id), 'Could not duplicate') },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: () => Alert.alert('Delete pack?', `"${p.name}" and its stickers will be removed.`, [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: () => run(() => deletePack(p.id), 'Could not delete') },
-        ]),
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    sheet({
+      title: p.name,
+      options: [
+        { label: 'Edit name & author', onPress: () => onEdit(p) },
+        { label: 'Duplicate', onPress: () => run(() => duplicatePack(p.id), 'Could not duplicate') },
+        {
+          label: 'Delete',
+          destructive: true,
+          onPress: () => Alert.alert('Delete pack?', `"${p.name}" and its stickers will be removed.`, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: () => run(() => deletePack(p.id), 'Could not delete') },
+          ]),
+        },
+      ],
+    });
   };
 
   return (

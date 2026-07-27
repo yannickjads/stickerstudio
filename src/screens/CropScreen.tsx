@@ -3,14 +3,12 @@ import { View, Text, StyleSheet, Pressable, Dimensions, Alert, ActivityIndicator
 import { Image } from 'expo-image';
 import { File } from 'expo-file-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { runOnJS, useSharedValue } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { C } from '../theme';
-import { Btn, Header, S } from '../ui';
+import { Btn, Header, sheet, S } from '../ui';
 import type { Nav, MediaSource } from '../nav';
 import type { EditorDocument } from '../types';
 import { DOC_SCHEMA_VERSION, PACK_MAX } from '../types';
@@ -27,8 +25,11 @@ import {
   type QualityKey,
 } from '../editor/renderVideo';
 import { videoInfo, extractFrames } from '../../modules/video-frames';
-import Cropper from '../SquareCropper';
+import CropOverlay from '../editor/CropOverlay';
 import { Slider } from '../editor/controls';
+import {
+  centredRect, toPixels, fromPixels, type Aspect, type NRect,
+} from '../editor/cropGeometry';
 
 type Item = {
   id: string; uri: string; w: number; h: number; maybeAnimated: boolean;
@@ -36,12 +37,12 @@ type Item = {
   poster?: string;                 // still frame shown in the cropper
 };
 type Shape = 'square' | 'original' | 'free';
-const { width: SCREEN_W } = Dimensions.get('window');
-const BOX = Math.min(SCREEN_W - 44, 380);
-const EDGE = (SCREEN_W - BOX) / 2; // everything aligns to the crop box edges
-const HANDLE = 48;      // freeform corner: the touch target
-const GRIP = 22;        // ...and the bracket drawn inside it
-const FREE_MIN = 120;   // smallest the crop window may be dragged (caps the ratio at ~3:1)
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+const EDGE = 20;
+// The picture gets as much room as the controls leave it: being able to see what
+// you are cutting away is the whole point of showing the crop as an overlay.
+const STAGE_W = SCREEN_W - EDGE * 2;
+const STAGE_H = Math.max(260, Math.min(SCREEN_H * 0.56, 520));
 
 export default function CropScreen({ nav, packId, packName, startSlot, editStickerId, source = 'photos' }: { nav: Nav; packId: string; packName: string; startSlot?: number; editStickerId?: string; source?: MediaSource }) {
   const insets = useSafeAreaInsets();
@@ -64,9 +65,8 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   // re-cropped carries whatever ratio it was made with, as customAr.
   const [aspect, setAspect] = useState<Shape>('square');
   const [customAr, setCustomAr] = useState<number | null>(null);
-  // Freeform: the crop window itself is dragged to whatever shape you want.
-  const [free, setFree] = useState({ w: BOX, h: BOX });
-  const freeStart = useRef({ w: BOX, h: BOX });
+  // The crop itself, as a fraction of the picture — see editor/cropGeometry.ts.
+  const [rect, setRect] = useState<NRect>({ x: 0, y: 0, w: 1, h: 1 });
   const launched = useRef(false);
   // Re-cropping an existing sticker: same screen, same maths, but it replaces one
   // sticker instead of filling slots.
@@ -79,10 +79,18 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   const baseRef = useRef<{ name: string; author: string; seq: number }>({ name: packName, author: '', seq: 2 });
   const splitsRef = useRef<string[]>([]);
 
-  const tx = useSharedValue(0);
-  const ty = useSharedValue(0);
-  const scale = useSharedValue(1);
-  const resetTransform = () => { tx.value = 0; ty.value = 0; scale.value = 1; };
+  // "Centre" is now literally that: the biggest crop of the chosen shape, middled.
+  const recentre = (it: Item | null | undefined = items?.[index]) => {
+    if (it) setRect(centredRect(arOf(it), it.w, it.h));
+  };
+
+  // A new picture starts on a centred crop of the chosen shape. Reopening a
+  // sticker is the exception: it brings the crop it was made with.
+  const shownId = items?.[index]?.id;
+  useEffect(() => {
+    const it = items?.[index];
+    if (it && !editing) setRect(centredRect(arOf(it), it.w, it.h));
+  }, [shownId, editing]);
 
   useEffect(() => {
     if (editing) return;
@@ -114,16 +122,9 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         // so "Crop again" adjusts the framing instead of throwing it away.
         const c = 'crop' in layer ? layer.crop : null;
         if (c && c.width > 0 && c.height > 0 && asset.width > 0 && asset.height > 0) {
-          const ar = c.width / c.height;
-          setCustomAr(ar);
-          // Same unrounded box the cropper will use, or the rect cannot be reproduced.
-          const vw = ar >= 1 ? BOX : BOX * ar;
-          const vh = ar >= 1 ? BOX / ar : BOX;
-          const base = Math.max(vw / asset.width, vh / asset.height);
-          const eff = vw / c.width;
-          scale.value = Math.min(Math.max(eff / base, 1), 8);
-          tx.value = eff * (asset.width / 2 - c.x - c.width / 2);
-          ty.value = eff * (asset.height / 2 - c.y - c.height / 2);
+          // Reopen on exactly the crop this sticker was made with.
+          setCustomAr(c.width / c.height);
+          setRect(fromPixels(c, asset.width, asset.height));
         }
         setItems([{
           id: s.id, uri: asset.localUri, w: asset.width, h: asset.height,
@@ -229,44 +230,20 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   // cropping again — belongs to the sticker screen, which is the one place a
   // sticker is edited whether you just made it or made it last week.
   const clipOptions = () => {
-    Alert.alert('Clip options', undefined, [
-      ...(Object.keys(QUALITY) as QualityKey[]).map((k) => ({
-        text: tick(quality === k, QUALITY[k].label),
-        onPress: () => { setQuality(k); dropPreview(); },
-      })),
-      {
-        text: tick(optimize, 'Smaller file size'),
-        onPress: () => { setOptimize((v) => !v); dropPreview(); },
-      },
-      { text: 'Done', style: 'cancel' as const },
-    ]);
+    sheet({
+      title: 'Clip options',
+      options: [
+        ...(Object.keys(QUALITY) as QualityKey[]).map((k) => ({
+          label: tick(quality === k, QUALITY[k].label),
+          onPress: () => { setQuality(k); dropPreview(); },
+        })),
+        {
+          label: tick(optimize, 'Smaller file size'),
+          onPress: () => { setOptimize((v) => !v); dropPreview(); },
+        },
+      ],
+    });
   };
-
-  // Dragging the freeform corner. The window stays centred in its box, so the
-  // opposite edge moves with it and the finger travels half of each size change.
-  // The gesture is built once and reads through refs, so it is never swapped out
-  // mid-drag.
-  const freeRef = useRef(free);
-  useEffect(() => { freeRef.current = free; }, [free]);
-
-  const beginCorner = useCallback(() => { freeStart.current = { ...freeRef.current }; }, []);
-  const setFreeSize = useCallback((w: number, h: number) => {
-    const clamp = (v: number) => Math.min(Math.max(v, FREE_MIN), BOX);
-    setFree({ w: clamp(w), h: clamp(h) });
-    setPreview((p) => { if (p) deleteFile(p.uri); return null; });
-  }, []);
-
-  const cornerGesture = React.useMemo(() => Gesture.Pan()
-    .onBegin(() => { 'worklet'; runOnJS(beginCorner)(); })
-    .onUpdate((e) => {
-      'worklet';
-      // The handle is the TOP-right corner, so dragging UP has to make the window
-      // taller — hence the minus on Y.
-      runOnJS(setFreeSize)(
-        freeStart.current.w + e.translationX * 2,
-        freeStart.current.h - e.translationY * 2,
-      );
-    }), [beginCorner, setFreeSize]);
 
   // Render the clip for real and show it, rather than promising what it will look
   // like. It is the same call the save path makes, so what you watch is the file
@@ -294,49 +271,19 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   const optionsSummary = () =>
     [QUALITY[quality].label, optimize ? 'smaller file' : null].filter(Boolean).join(' · ');
 
-  // A sticker is always delivered on a 512×512 canvas — WhatsApp and Telegram
-  // both insist — so "keep the original shape" means the picture keeps its ratio
-  // and the canvas fills out around it with transparency, which is what every
-  // renderer here already does with a non-square crop (fitSize, 'contain').
-  const arOf = (it: Item) =>
-    aspect === 'free' ? free.w / free.h
+  // The ratio the crop must hold, in image pixels. null means freeform: every
+  // corner moves on its own. A sticker being re-cropped carries the ratio it was
+  // made with, whatever the Shape buttons say.
+  const arOf = (it: Item): Aspect =>
+    aspect === 'free' ? null
       : customAr ?? (aspect === 'original' ? it.w / it.h : 1);
-  // Deliberately NOT rounded: vw/vh has to equal the ratio exactly, or re-cropping
-  // a sticker cannot reproduce the rect it was made with. React Native lays out
-  // fractional points fine.
-  const viewBox = (it: Item) => {
-    if (aspect === 'free') return { vw: free.w, vh: free.h };
-    const ar = arOf(it);
-    return ar >= 1 ? { vw: BOX, vh: BOX / ar } : { vw: BOX * ar, vh: BOX };
-  };
 
-  // Integer crop rect of the chosen shape, fully inside the image.
+  // A sticker is always delivered on a 512×512 canvas — WhatsApp and Telegram
+  // both insist — so a non-square crop keeps its ratio and the canvas fills out
+  // around it with transparency, which every renderer here already does.
   const cropRect = (it: Item, centered: boolean) => {
-    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
-    const { vw, vh } = viewBox(it);
-    const ar = vw / vh;
-    // The height follows from the width rather than being measured separately:
-    // rounding the two independently pulls the rect off its shape, badly so when
-    // it is only a few dozen pixels across.
-    const heightFor = (cw: number) => clamp(Math.round(cw / ar), 1, it.h);
-
-    if (centered) {
-      // The largest rect of this shape that fits, centred.
-      let cw = clamp(Math.min(it.w, Math.round(it.h * ar)), 1, it.w);
-      let ch = heightFor(cw);
-      if (ch > it.h) { ch = it.h; cw = clamp(Math.round(it.h * ar), 1, it.w); }
-      return { x: Math.round((it.w - cw) / 2), y: Math.round((it.h - ch) / 2), width: cw, height: ch };
-    }
-    const base = Math.max(vw / it.w, vh / it.h);
-    const eff = base * scale.value;
-    // The epsilon absorbs float error: seeding this from a stored crop makes eff
-    // exactly vw/width, and vw/eff then lands a hair BELOW the integer it should
-    // be, so a plain floor would shave a pixel off on every re-crop.
-    const cw = clamp(Math.floor(vw / eff + 1e-6), 1, it.w);
-    const ch = heightFor(cw);
-    const x = Math.round(clamp(it.w / 2 - (vw / 2 + tx.value) / eff, 0, it.w - cw));
-    const y = Math.round(clamp(it.h / 2 - (vh / 2 + ty.value) / eff, 0, it.h - ch));
-    return { x, y, width: cw, height: ch };
+    const ar = arOf(it);
+    return toPixels(centered ? centredRect(ar, it.w, it.h) : rect, it.w, it.h, ar);
   };
 
   // No free slots left? Roll over into "<name> 2", "<name> 3", ... (same author).
@@ -489,7 +436,7 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
       }
       const made = await renderAndStore(items[index], false);
       Haptics.selectionAsync();
-      if (index < items.length - 1) { setIndex(index + 1); resetTransform(); setStartMs(0); }
+      if (index < items.length - 1) { setIndex(index + 1); recentre(items[index + 1]); setStartMs(0); }
       // Only for a single import: after a batch you want the pack, not one sticker.
       else if (items.length === 1 && !splitsRef.current.length) await openMade(made);
       else finish();
@@ -509,7 +456,6 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   const cur = items[index];
   const isLast = index >= items.length - 1;
   const willSplit = remaining != null && items.length - index > remaining;
-  const { vw, vh } = viewBox(cur);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
@@ -519,41 +465,30 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
         <Text style={[S.hint, { textAlign: 'center', marginBottom: 10 }]}>
           {busy && progress ? progress
-            : editing ? 'drag to move · pinch to zoom'
-            : `${index + 1} / ${items.length} · drag to move · pinch to zoom`}
+            : editing ? 'drag the frame · pull a corner to resize'
+            : `${index + 1} / ${items.length} · drag the frame · pull a corner to resize`}
         </Text>
 
-        {/* The crop window takes the chosen shape; the box around it stays BOX tall
-            so nothing below it jumps when the shape changes. */}
-        <View style={{ width: BOX, height: BOX, alignSelf: 'center', alignItems: 'center', justifyContent: 'center' }}>
-          <Cropper key={`${cur.id}-${cur.poster ?? ''}-${vw}x${vh}`} uri={cur.poster ?? cur.uri}
-            imgW={cur.w} imgH={cur.h} viewW={vw} viewH={vh} tx={tx} ty={ty} scale={scale} />
-          {/* The finished clip, playing, over the cropper it came from. It also
-              covers the pan gesture, so the framing cannot drift away from what
-              is being shown. */}
+        <View style={{ width: STAGE_W, height: STAGE_H, alignSelf: 'center' }}>
+          <CropOverlay
+            uri={cur.poster ?? cur.uri}
+            imgW={cur.w} imgH={cur.h}
+            stageW={STAGE_W} stageH={STAGE_H}
+            aspect={arOf(cur)}
+            rect={rect}
+            onChange={setRect}
+            onSettled={dropPreview}
+          />
+          {/* The finished clip, playing, over the picture it came from — and over
+              the gesture too, so the framing cannot drift from what is shown. */}
           {preview ? (
-            <Pressable style={[st.previewWrap, { width: vw, height: vh }]} onPress={dropPreview}>
-              <Image source={{ uri: preview.uri }} style={{ width: vw, height: vh }}
+            <Pressable style={st.previewWrap} onPress={dropPreview}>
+              <Image source={{ uri: preview.uri }} style={StyleSheet.absoluteFill}
                 contentFit="contain" cachePolicy="none" />
               <View style={st.previewTag}>
                 <Text style={st.previewTagTxt}>Tap to keep editing</Text>
               </View>
             </Pressable>
-          ) : null}
-
-          {/* Freeform: drag the corner to shape the window itself. The window is
-              centred, so the opposite edge moves with it — hence the doubling.
-              Top-right rather than bottom-right: down there it sits under your own
-              thumb and crowds the buttons directly beneath the picture. */}
-          {aspect === 'free' && !preview ? (
-            <GestureDetector gesture={cornerGesture}>
-              <View style={[st.handleHit, {
-                left: BOX / 2 + vw / 2 - HANDLE / 2,
-                top: BOX / 2 - vh / 2 - HANDLE / 2,
-              }]}>
-                <View style={st.handleMark} />
-              </View>
-            </GestureDetector>
           ) : null}
         </View>
 
@@ -568,10 +503,12 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
                 <Pressable
                   key={v}
                   onPress={() => {
-                    // Freeform starts from the shape currently on screen, so picking
-                    // it changes nothing until the corner is actually dragged.
-                    if (v === 'free') { const b = viewBox(cur); setFree({ w: b.vw, h: b.vh }); }
-                    setAspect(v); setCustomAr(null); resetTransform(); dropPreview();
+                    setAspect(v); setCustomAr(null); dropPreview();
+                    // Freeform keeps whatever is on screen — there is no ratio to
+                    // impose — while the other two re-fit the crop to their shape.
+                    if (v !== 'free') {
+                      setRect(centredRect(v === 'original' ? cur.w / cur.h : 1, cur.w, cur.h));
+                    }
                   }}
                   style={[st.length, on && st.lengthOn]}>
                   <Text style={[st.lengthTxt, on && st.lengthTxtOn]}>{label}</Text>
@@ -659,7 +596,7 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
           {/* Centring is just the framing going back to the middle at full size —
               it saves nothing, which is why it is a plain secondary button. */}
           <Btn label="Centre" kind="ghost"
-            onPress={() => { resetTransform(); dropPreview(); }} disabled={busy} />
+            onPress={() => { recentre(cur); dropPreview(); }} disabled={busy} />
         </View>
       </ScrollView>
 
@@ -680,7 +617,7 @@ const st = StyleSheet.create({
   fpsLabel: { color: C.muted, fontSize: 14, fontWeight: '600' },
   sizeNote: { color: C.muted, fontSize: 12, textAlign: 'center', lineHeight: 16, marginTop: -4 },
   previewWrap: {
-    position: 'absolute', borderRadius: 14,
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 14,
     borderCurve: 'continuous', overflow: 'hidden', backgroundColor: C.surface2,
     alignItems: 'center', justifyContent: 'center',
   },
@@ -689,21 +626,6 @@ const st = StyleSheet.create({
     borderRadius: 999, backgroundColor: 'rgba(10,12,18,0.72)',
   },
   previewTagTxt: { color: C.text, fontSize: 12, fontWeight: '600' },
-  // A finger-sized target centred on the corner; nothing is drawn on it, so the
-  // grip can stay small without being hard to hit.
-  handleHit: { position: 'absolute', width: HANDLE, height: HANDLE },
-  // The grip itself: an L hugging the corner from the inside, the way every photo
-  // cropper marks one. A bracket has no direction, so unlike an arrow glyph there
-  // is no way for it to end up pointing along the edge instead of across it.
-  handleMark: {
-    position: 'absolute',
-    left: HANDLE / 2 - GRIP, top: HANDLE / 2,
-    width: GRIP, height: GRIP,
-    borderTopWidth: 3, borderRightWidth: 3, borderColor: C.accent,
-    borderTopRightRadius: 12,
-    // Keeps it readable over a pale photo, where cyan on white would vanish.
-    shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
-  },
   lengthOn: { backgroundColor: C.accent },
   lengthTxt: { color: C.text, fontSize: 13, fontWeight: '600' },
   lengthTxtOn: { color: C.ink },

@@ -8,7 +8,7 @@ import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { C } from '../theme';
-import { Btn, Header, NavCircle, S, EDGE } from '../ui';
+import { Btn, Header, NavCircle, sheet, S, EDGE } from '../ui';
 import type { Nav, MediaSource } from '../nav';
 import type { Pack, Sticker } from '../types';
 import { PACK_MAX } from '../types';
@@ -101,13 +101,15 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
   const addAt = (slot: number) => {
     const go = (source: MediaSource) =>
       nav.push({ name: 'crop', packId, packName: name, startSlot: slot, source });
-    Alert.alert('New sticker', undefined, [
-      { text: 'Photo or GIF', onPress: () => go('photos') },
-      { text: 'Video', onPress: () => go('videos') },
-      { text: 'Photos and videos together', onPress: () => go('mixed') },
-      { text: 'File', onPress: () => go('files') },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    sheet({
+      title: 'New sticker',
+      options: [
+        { label: 'Photo or GIF', onPress: () => go('photos') },
+        { label: 'Video', onPress: () => go('videos') },
+        { label: 'Photos and videos together', onPress: () => go('mixed') },
+        { label: 'File', onPress: () => go('files') },
+      ],
+    });
   };
 
   const sendToWhatsApp = async () => {
@@ -229,32 +231,38 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     const hasStickers = stickers.length > 0;
     // Renaming and deleting must stay reachable for an empty pack — only the
     // export actions depend on there being stickers.
-    Alert.alert(name, pack?.author ? `by ${pack.author}` : undefined, [
-      { text: 'Edit name & author', onPress: editPack },
-      {
-        text: pack?.trayUri ? 'Change pack icon…' : 'Pack icon from a photo…',
-        onPress: chooseTray,
-      },
-      ...(pack?.trayUri ? [{ text: 'Use a sticker as the icon instead', onPress: clearTray }] : []),
-      ...(hasStickers ? [
-        { text: 'Back up pack (.zip)', onPress: exportPack },
-        { text: 'Add to Telegram', onPress: sendToTelegram },
-        { text: 'Export as .wastickers', onPress: exportWa },
-        { text: 'Save all to Photos', onPress: saveAllToPhotos },
-      ] : []),
-      {
-        text: 'Delete pack', style: 'destructive' as const,
-        onPress: () => Alert.alert(
-          'Delete pack?',
-          hasStickers ? `"${name}" and its stickers will be removed.` : `"${name}" will be removed.`,
-          [
-            { text: 'Cancel', style: 'cancel' as const },
-            { text: 'Delete', style: 'destructive' as const, onPress: async () => { await deletePack(packId); nav.pop(); } },
-          ],
-        ),
-      },
-      { text: 'Cancel', style: 'cancel' as const },
-    ]);
+    sheet({
+      title: name,
+      message: pack?.author ? `by ${pack.author}` : undefined,
+      options: [
+        { label: 'Edit name & author', onPress: editPack },
+        {
+          label: pack?.trayUri ? 'Change pack icon…' : 'Pack icon from a photo…',
+          onPress: chooseTray,
+        },
+        ...(pack?.trayUri ? [{ label: 'Use a sticker as the icon instead', onPress: clearTray }] : []),
+        ...(hasStickers ? [
+          { label: 'Back up pack (.zip)', onPress: exportPack },
+          { label: 'Add to Telegram', onPress: sendToTelegram },
+          { label: 'Export as .wastickers', onPress: exportWa },
+          { label: 'Save all to Photos', onPress: saveAllToPhotos },
+        ] : []),
+        {
+          label: 'Delete pack',
+          destructive: true,
+          // Still an alert, and deliberately: this one is a question, not a
+          // choice between actions.
+          onPress: () => Alert.alert(
+            'Delete pack?',
+            hasStickers ? `"${name}" and its stickers will be removed.` : `"${name}" will be removed.`,
+            [
+              { text: 'Cancel', style: 'cancel' as const },
+              { text: 'Delete', style: 'destructive' as const, onPress: async () => { await deletePack(packId); nav.pop(); } },
+            ],
+          ),
+        },
+      ],
+    });
   };
 
   // While an export is reading sticker files, deleting one (or leaving the screen)
