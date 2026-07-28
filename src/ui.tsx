@@ -3,10 +3,56 @@ import {
   View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from './theme';
 
 export type IconName = React.ComponentProps<typeof Ionicons>['name'];
+
+/**
+ * Apple's own icons.
+ *
+ * SF Symbols are drawn by the system, so they carry iOS's weights, optical sizes
+ * and alignment rather than approximating them — which is most of why a screen
+ * reads as made-for-the-platform instead of merely styled like it.
+ *
+ * The mapping lives in one table: a name that turns out to be wrong is one edit
+ * rather than a hunt through the screens. Every entry also names an Ionicon,
+ * which renders instead if the symbol is missing on this OS version, so a bad
+ * guess degrades to the old icon rather than to an empty square.
+ */
+const SYMBOLS = {
+  back: ['chevron.left', 'chevron-back'],
+  forward: ['chevron.right', 'chevron-forward'],
+  more: ['ellipsis', 'ellipsis-horizontal'],
+  add: ['plus', 'add'],
+  search: ['magnifyingglass', 'search'],
+  star: ['star.fill', 'star'],
+  photo: ['photo', 'image-outline'],
+  photos: ['photo.on.rectangle', 'images-outline'],
+  packs: ['square.stack', 'albums-outline'],
+  pencil: ['pencil', 'pencil'],
+  warning: ['exclamationmark.triangle', 'alert-circle-outline'],
+  close: ['xmark', 'close'],
+} as const satisfies Record<string, readonly [string, IconName]>;
+
+export type SymName = keyof typeof SYMBOLS;
+
+export function Sym({
+  name, size = 20, color = C.accent, style,
+}: { name: SymName; size?: number; color?: string; style?: any }) {
+  const [sf, ion] = SYMBOLS[name];
+  return (
+    <SymbolView
+      name={sf as never}
+      size={size}
+      tintColor={color}
+      type="monochrome"
+      style={[{ width: size, height: size }, style]}
+      fallback={<Ionicons name={ion} size={size} color={color} style={style} />}
+    />
+  );
+}
 
 // iOS-native metrics: 50pt buttons, 17pt semibold labels, continuous corners,
 // ≥44pt hit targets everywhere.
@@ -51,11 +97,11 @@ export function NavText({ label, onPress, disabled }: { label: string; onPress: 
 }
 
 // Circular tinted symbol button (iOS 17 toolbar style) — for "+", "…", etc.
-export function NavCircle({ icon, onPress, disabled }: { icon: IconName; onPress: () => void; disabled?: boolean }) {
+export function NavCircle({ icon, onPress, disabled }: { icon: SymName; onPress: () => void; disabled?: boolean }) {
   return (
     <Pressable onPress={onPress} disabled={disabled} hitSlop={6}
       style={({ pressed }) => [S.navCircle, (pressed || disabled) && { opacity: disabled ? 0.35 : 0.6 }]}>
-      <Ionicons name={icon} size={20} color={C.accent} />
+      <Sym name={icon} size={19} />
     </Pressable>
   );
 }
@@ -66,7 +112,7 @@ export function Header({ title, onBack, right }: { title: string; onBack?: () =>
     <View style={S.header}>
       {onBack ? (
         <Pressable onPress={onBack} hitSlop={10} style={({ pressed }) => [S.headerSide, S.back, pressed && { opacity: 0.55 }]}>
-          <Ionicons name="chevron-back" size={28} color={C.accent} />
+          <Sym name="back" size={22} />
         </Pressable>
       ) : (
         <View style={S.headerSide} />
@@ -195,7 +241,7 @@ export function Row({
   label, value, onPress, destructive, disabled, icon,
 }: {
   label: string; value?: string | null; onPress: () => void;
-  destructive?: boolean; disabled?: boolean; icon?: IconName;
+  destructive?: boolean; disabled?: boolean; icon?: SymName;
 }) {
   return (
     <Pressable
@@ -203,10 +249,10 @@ export function Row({
       disabled={disabled}
       style={({ pressed }) => [S.row, pressed && !disabled && { backgroundColor: C.surface2 }, disabled && S.disabled]}
     >
-      {icon ? <Ionicons name={icon} size={19} color={destructive ? C.bad : C.accent} style={{ marginRight: 10 }} /> : null}
+      {icon ? <Sym name={icon} size={19} color={destructive ? C.bad : C.accent} style={{ marginRight: 10 }} /> : null}
       <Text style={[S.rowLabel, destructive && { color: C.bad }]} numberOfLines={1}>{label}</Text>
       {value ? <Text style={S.rowValue} numberOfLines={1}>{value}</Text> : null}
-      {destructive ? null : <Ionicons name="chevron-forward" size={16} color={C.muted} />}
+      {destructive ? null : <Sym name="forward" size={14} color={C.muted} />}
     </Pressable>
   );
 }
@@ -214,6 +260,12 @@ export function Row({
 const CORNER = Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : null;
 
 export const EDGE = 20; // one margin for the whole app: headers, grids, footers
+// One height and one radius for every full-width action, wherever it appears. The
+// pinned "Add to WhatsApp" and the sheet's Cancel are the same shape of thing —
+// a full-width button at the bottom of the screen — and looked like two different
+// controls only because they were built in different places.
+export const ACTION_H = 54;
+export const ACTION_R = 14;
 
 export const S = StyleSheet.create({
   header: {
@@ -244,12 +296,12 @@ export const S = StyleSheet.create({
   },
 
   primary: {
-    backgroundColor: C.accent, borderRadius: 14, height: 50,
+    backgroundColor: C.accent, borderRadius: ACTION_R, height: ACTION_H,
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, ...CORNER,
   },
   primaryTxt: { color: C.ink, fontSize: 17, fontWeight: '600', letterSpacing: -0.2 },
   ghost: {
-    backgroundColor: C.surface2, borderRadius: 14, height: 50,
+    backgroundColor: C.surface2, borderRadius: ACTION_R, height: ACTION_H,
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, ...CORNER,
   },
   ghostTxt: { color: C.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.2 },
@@ -268,15 +320,17 @@ export const S = StyleSheet.create({
   // The sheet. Sized and spaced to iOS's own: 17pt actions on ~57pt rows, two
   // grouped cards with the cancel apart, and hairlines between the choices.
   sheetDim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheetBody: { padding: 8, gap: 8 },
+  // Inset to the app's own margin, so the Cancel lines up with the buttons
+  // pinned at the bottom of the screens behind it.
+  sheetBody: { paddingHorizontal: EDGE, paddingTop: 8, gap: 8 },
   sheetCard: {
-    backgroundColor: C.surface, borderRadius: 14, ...CORNER, overflow: 'hidden',
+    backgroundColor: C.surface, borderRadius: ACTION_R, ...CORNER, overflow: 'hidden',
   },
   sheetHead: { paddingHorizontal: 16, paddingVertical: 14, alignItems: 'center', gap: 3 },
   sheetTitle: { color: C.text, fontSize: 15, fontWeight: '700', textAlign: 'center' },
   sheetMessage: { color: C.muted, fontSize: 13, textAlign: 'center', lineHeight: 18 },
   sheetLine: { height: StyleSheet.hairlineWidth, backgroundColor: C.line },
-  sheetItem: { minHeight: 57, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  sheetItem: { minHeight: ACTION_H, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
   sheetItemTxt: { color: C.accent, fontSize: 17, fontWeight: '500', textAlign: 'center' },
 
   h2: { fontSize: 20, fontWeight: '700', color: C.text },

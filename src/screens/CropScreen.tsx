@@ -6,9 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
-import { Ionicons } from '@expo/vector-icons';
 import { C } from '../theme';
-import { Btn, Header, sheet, S } from '../ui';
+import { Btn, Header, Sym, sheet, S } from '../ui';
 import type { Nav, MediaSource } from '../nav';
 import type { EditorDocument } from '../types';
 import { DOC_SCHEMA_VERSION, PACK_MAX } from '../types';
@@ -576,7 +575,7 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         {cur.video ? (
           <Pressable onPress={clipOptions} style={st.optionsRow} disabled={busy}>
             <Text style={st.optionsTxt}>{optionsSummary()}</Text>
-            <Ionicons name="chevron-forward" size={15} color={C.muted} />
+            <Sym name="forward" size={13} color={C.muted} />
           </Pressable>
         ) : null}
 

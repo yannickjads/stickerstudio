@@ -2,13 +2,12 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, Alert, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { C } from '../theme';
-import { Btn, Header, NavCircle, sheet, S, EDGE } from '../ui';
+import { Btn, Header, NavCircle, Sym, sheet, S, EDGE } from '../ui';
 import type { Nav, MediaSource } from '../nav';
 import type { Pack, Sticker } from '../types';
 import { PACK_MAX } from '../types';
@@ -291,7 +290,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
       <Header title={name} onBack={locked ? undefined : nav.pop}
-        right={<NavCircle icon="ellipsis-horizontal" onPress={packMenu} disabled={busy || waBusy} />} />
+        right={<NavCircle icon="more" onPress={packMenu} disabled={busy || waBusy} />} />
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {/* The pack's icon, shown rather than buried in a menu — it is a visible
@@ -303,10 +302,10 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
               <Image source={{ uri: cover }} style={styles.iconImg} contentFit="cover"
                 cachePolicy="none" transition={140} />
             ) : (
-              <Ionicons name="image-outline" size={22} color={C.muted} />
+              <Sym name="photo" size={22} color={C.muted} />
             )}
             <View style={styles.iconEdit}>
-              <Ionicons name="pencil" size={11} color={C.ink} />
+              <Sym name="pencil" size={11} color={C.ink} />
             </View>
           </View>
           <View style={{ flex: 1 }}>
@@ -316,7 +315,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
               {pack?.author ? ` · by ${pack.author}` : ''}
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color={C.muted} />
+          <Sym name="forward" size={14} color={C.muted} />
         </Pressable>
 
         <View style={styles.grid}>
@@ -331,7 +330,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
                     transition={140} cachePolicy="none" />
                   {isCover(s) ? (
                     <View style={styles.coverBadge}>
-                      <Ionicons name="star" size={11} color={C.ink} />
+                      <Sym name="star" size={11} color={C.ink} />
                     </View>
                   ) : null}
                 </Pressable>
@@ -342,7 +341,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
               <Pressable key={`slot-${i}`} disabled={locked}
                 style={({ pressed }) => [styles.tile, styles.slot, next && styles.slotNext, pressed && styles.pressed]}
                 onPress={() => addAt(i)}>
-                {next ? <Ionicons name="add" size={24} color={C.accent} /> : null}
+                {next ? <Sym name="add" size={22} /> : null}
               </Pressable>
             );
           })}

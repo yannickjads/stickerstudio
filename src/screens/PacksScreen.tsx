@@ -2,9 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, Alert, Dimensions, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
 import { C } from '../theme';
-import { Btn, NavCircle, S, EDGE, sheet } from '../ui';
+import { Btn, NavCircle, S, EDGE, sheet, Sym } from '../ui';
 import type { Nav } from '../nav';
 import type { Pack } from '../types';
 import { PACK_MAX } from '../types';
@@ -170,14 +169,14 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
             <NavCircle icon={searching ? 'close' : 'search'} disabled={busy}
               onPress={() => { setSearching((v) => !v); setQuery(''); }} />
           ) : null}
-          <NavCircle icon="ellipsis-horizontal" onPress={appMenu} disabled={busy} />
+          <NavCircle icon="more" onPress={appMenu} disabled={busy} />
           <NavCircle icon="add" onPress={onNew} disabled={busy} />
         </View>
       </View>
 
       {searching ? (
         <View style={styles.searchRow}>
-          <Ionicons name="search" size={16} color={C.muted} />
+          <Sym name="search" size={15} color={C.muted} />
           <TextInput
             style={styles.searchInput}
             value={query}
@@ -195,14 +194,14 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
       {loadError ? (
         // A failure must not look like an empty library — say so, and offer a way back.
         <View style={[S.empty, { flex: 1 }]}>
-          <View style={styles.badge}><Ionicons name="alert-circle-outline" size={34} color={C.bad} /></View>
+          <View style={styles.badge}><Sym name="warning" size={32} color={C.bad} /></View>
           <Text style={S.emptyTxt}>Could not load your packs.{'\n'}{loadError}</Text>
           <Btn label="Try again" onPress={() => { setLoading(true); load(); }}
             style={{ alignSelf: 'stretch', marginHorizontal: 40 }} />
         </View>
       ) : packs.length === 0 && !loading ? (
         <View style={[S.empty, { flex: 1 }]}>
-          <View style={styles.badge}><Ionicons name="albums-outline" size={34} color={C.accent} /></View>
+          <View style={styles.badge}><Sym name="packs" size={32} /></View>
           <Text style={S.emptyTxt}>No packs yet.{'\n'}Create your first sticker pack.</Text>
           <Btn label="New pack" onPress={onNew} disabled={busy}
             style={{ alignSelf: 'stretch', marginHorizontal: 40 }} />
@@ -224,7 +223,7 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
                   <Image source={{ uri: p.cover }} style={styles.coverImg} contentFit="cover"
                     transition={160} cachePolicy="none" />
                 ) : (
-                  <Ionicons name="images-outline" size={30} color={C.line} />
+                  <Sym name="photos" size={28} color={C.line} />
                 )}
               </View>
               <View style={styles.meta}>

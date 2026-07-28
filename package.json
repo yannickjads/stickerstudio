@@ -21,6 +21,7 @@
     "expo-sharing": "~14.0.8",
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
+    "expo-symbols": "~1.0.8",
     "gifenc": "^1.0.3",
     "jszip": "^3.10.1",
     "react": "19.1.0",
