@@ -25,6 +25,7 @@ import {
   type QualityKey,
 } from '../editor/renderVideo';
 import { videoInfo, extractFrames } from '../../modules/video-frames';
+import { cutoutSupported } from '../../modules/subject-cutout';
 import CropOverlay from '../editor/CropOverlay';
 import { Segmented, Slider } from '../editor/controls';
 import {
@@ -56,6 +57,11 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   const [quality, setQuality] = useState<QualityKey>('balanced');
   const [fps, setFps] = useState<number>(DEFAULT_FPS);
   const [optimize, setOptimize] = useState(true);
+  // Lifting the subject out of every frame. Off by default: it is the slowest
+  // thing this app does, and most clips do not want it.
+  const [clipCutout, setClipCutout] = useState(false);
+  const [canCutout, setCanCutout] = useState(false);
+  useEffect(() => { cutoutSupported().then(setCanCutout); }, []);
   // The rendered clip, exactly as it will be saved — same code path, same file.
   // Any change to a setting drops it, so whatever is on screen is always current,
   // and saving reuses the file instead of encoding the whole thing a second time.
@@ -241,6 +247,10 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
           label: tick(optimize, 'Smaller file size'),
           onPress: () => { setOptimize((v) => !v); dropPreview(); },
         },
+        ...(canCutout ? [{
+          label: tick(clipCutout, 'Remove the background'),
+          onPress: () => { setClipCutout((v) => !v); dropPreview(); },
+        }] : []),
       ],
     });
   };
@@ -256,8 +266,9 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
       const uri = await renderVideoSticker(
         it.uri,
         { ...crop, videoW: it.w, videoH: it.h },
-        { startMs, durationMs: effClip(it), quality, fps, optimize },
+        { startMs, durationMs: effClip(it), quality, fps, optimize, cutout: clipCutout },
         (done, total) => setProgress(`rendering · frame ${done}/${total}`),
+        (stage, done, total) => setProgress(`${stage} · frame ${done}/${total}`),
       );
       dropPreview();
       setPreview({ uri, bytes: new File(uri).size ?? 0 });
@@ -336,8 +347,9 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         tmp = preview?.uri ?? await renderVideoSticker(
           it.uri,
           { ...crop, videoW: it.w, videoH: it.h },
-          { startMs, durationMs: effClip(it), quality, fps, optimize },
+          { startMs, durationMs: effClip(it), quality, fps, optimize, cutout: clipCutout },
           (done, total) => setProgress(`clip · frame ${done}/${total}`),
+          (stage, done, total) => setProgress(`${stage} · frame ${done}/${total}`),
         );
         setProgress(null);
       } else if (it.maybeAnimated) {

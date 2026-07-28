@@ -7,6 +7,7 @@ import { fitSize, type Rect } from './geometry';
 import { createGifEncoder, buildPalette } from './gifEncode';
 import { loadSkImage, STICKER_SIZE } from './renderCrop';
 import { writeTempBytes, deleteFile } from '../storage';
+import { cutoutSubject } from '../../modules/subject-cutout';
 
 // How many colours the shared palette gets. Frame rate is chosen separately —
 // they trade off against each other and against length, and which one to spend
@@ -35,18 +36,67 @@ const MAX_FRAMES = 150;
 // measured against — extraction hands back smaller frames.
 export type VideoCrop = Rect & { videoW: number; videoH: number };
 
+/**
+ * Lift the subject out of every frame, so the sticker moves with no background.
+ *
+ * Vision is run per frame — there is no video-aware matting on the device — which
+ * means it is slow and each frame is judged on its own. A frame where nothing is
+ * recognised reuses the previous frame's cut-out rather than falling back to the
+ * untouched picture: the background flashing back for two frames is far worse
+ * than the subject holding still for them.
+ *
+ * Returns null if the very first frame yields nothing, which means this clip is
+ * not one Vision can handle and the caller should say so rather than quietly
+ * producing an uncut sticker.
+ */
+async function cutOutFrames(
+  frames: string[], onProgress?: (done: number, total: number) => void,
+): Promise<string[] | null> {
+  const out: string[] = [];
+  const made: string[] = [];   // only the files WE created get cleaned up
+  let last: string | null = null;
+  for (let i = 0; i < frames.length; i++) {
+    let cut: string | null = null;
+    try { cut = await cutoutSubject(frames[i]); } catch { cut = null; }
+    if (cut) { made.push(cut); last = cut; }
+    if (!last) {
+      // Nothing found, and nothing to hold on to — this clip has no subject.
+      for (const f of made) await deleteFile(f);
+      return null;
+    }
+    out.push(cut ?? last);
+    onProgress?.(i + 1, frames.length);
+    await new Promise((r) => setTimeout(r, 0));  // keep the UI answering
+  }
+  return out;
+}
+
 export async function renderVideoSticker(
   uri: string,
   crop: VideoCrop,
-  opts: { startMs: number; durationMs: number; quality: QualityKey; fps?: number; optimize?: boolean },
+  opts: {
+    startMs: number; durationMs: number; quality: QualityKey;
+    fps?: number; optimize?: boolean; cutout?: boolean;
+  },
   onProgress?: (done: number, total: number) => void,
+  onStage?: (stage: string, done: number, total: number) => void,
 ): Promise<string> {
   const { colors } = QUALITY[opts.quality];
   const fps = opts.fps ?? DEFAULT_FPS;
   const durationMs = Math.min(opts.durationMs, MAX_CLIP_MS);
   const count = Math.max(2, Math.min(MAX_FRAMES, Math.round((durationMs / 1000) * fps)));
 
-  const frames = await extractFrames(uri, opts.startMs, durationMs, count, 720);
+  const raw = await extractFrames(uri, opts.startMs, durationMs, count, 720);
+  let frames = raw;
+  let cutFrames: string[] | null = null;
+  if (opts.cutout) {
+    cutFrames = await cutOutFrames(raw, (d, t) => onStage?.('cutting out', d, t));
+    if (!cutFrames) {
+      for (const f of raw) await deleteFile(f);
+      throw new Error('Nothing recognisable stood out in that clip, so its background was left alone.');
+    }
+    frames = cutFrames;
+  }
   const S = STICKER_SIZE;
   const info = { width: S, height: S, colorType: ColorType.RGBA_8888, alphaType: AlphaType.Unpremul };
   const paint = Skia.Paint();
@@ -84,8 +134,10 @@ export async function renderVideoSticker(
       if (px) samples.push(px);
       await new Promise((r) => setTimeout(r, 0));
     }
+    // A cut-out clip is transparent everywhere outside the subject, so the
+    // palette must carry a transparent entry whether or not we are differencing.
     const optimize = opts.optimize !== false;
-    const palette = buildPalette(samples, colors, optimize);
+    const palette = buildPalette(samples, colors, optimize || !!opts.cutout);
 
     // Pass 2 — encode, writing only what changed from frame to frame.
     const enc = createGifEncoder(S, S, { colors, palette, optimize });
@@ -100,7 +152,8 @@ export async function renderVideoSticker(
     return writeTempBytes(enc.finish(), 'gif');
 
   } finally {
-    for (const f of frames) await deleteFile(f);
+    for (const f of raw) await deleteFile(f);
+    if (cutFrames) for (const f of new Set(cutFrames)) await deleteFile(f);
   }
 
 }
