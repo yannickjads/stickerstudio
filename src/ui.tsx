@@ -108,8 +108,22 @@ export type SheetOption = {
 // drops it, which looks exactly like a menu that flashes open and shuts again.
 // So they are serialised: one waits for the previous callback plus the length of
 // the dismissal animation.
+//
+// The guard timer matters more than it looks. If a sheet is torn down without its
+// callback ever firing — the screen underneath navigating away, for instance —
+// the busy flag would stay set for the life of the process and EVERY menu in the
+// app would silently queue instead of opening. The timer unsticks it.
 let sheetBusy = false;
 let sheetQueued: (() => void) | null = null;
+let sheetGuard: ReturnType<typeof setTimeout> | null = null;
+
+function releaseSheet() {
+  if (sheetGuard) { clearTimeout(sheetGuard); sheetGuard = null; }
+  sheetBusy = false;
+  const next = sheetQueued;
+  sheetQueued = null;
+  next?.();
+}
 
 export function sheet(opts: { title?: string; message?: string; options: SheetOption[] }) {
   if (sheetBusy) { sheetQueued = () => sheet(opts); return; }
@@ -128,6 +142,7 @@ export function sheet(opts: { title?: string; message?: string; options: SheetOp
   const labels = [...options.map((o) => o.label), 'Cancel'];
   const destructive = options.findIndex((o) => o.destructive);
   sheetBusy = true;
+  sheetGuard = setTimeout(releaseSheet, 5000);
   ActionSheetIOS.showActionSheetWithOptions(
     {
       title, message,
@@ -137,14 +152,12 @@ export function sheet(opts: { title?: string; message?: string; options: SheetOp
       userInterfaceStyle: 'dark',
     },
     (i) => {
-      // Let the panel finish sliding away before anything else is presented,
-      // and before the chosen action runs — several of them open a picker.
+      // Let the panel finish sliding away before anything else is presented, and
+      // before the chosen action runs — several of them open a picker, which is
+      // the same collision one step later.
       setTimeout(() => {
-        sheetBusy = false;
         options[i]?.onPress?.();
-        const next = sheetQueued;
-        sheetQueued = null;
-        next?.();
+        releaseSheet();
       }, 320);
     },
   );
