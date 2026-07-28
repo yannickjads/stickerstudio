@@ -1,8 +1,9 @@
 import React from 'react';
 import {
-  View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, ActionSheetIOS, Alert,
+  View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from './theme';
 
 export type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -93,73 +94,83 @@ export type SheetOption = {
 };
 
 /**
- * A real iOS action sheet — the panel that slides up from the bottom — rather
- * than Alert.alert, which draws a centred box.
+ * A bottom sheet, built rather than borrowed.
  *
- * The distinction is not decoration: an alert is for something the system needs
- * to tell you, a sheet is for choosing between actions, and iOS users read the
- * difference without thinking about it. Sheets also put the destructive choice
- * in red and the cancel apart from the rest, both of which Alert cannot do with
- * a list of buttons.
+ * ActionSheetIOS was the obvious choice and it misbehaved here in two ways at
+ * once: no Cancel appeared, and a tap outside it went straight through to
+ * whatever was underneath — so dismissing the pack menu over a sticker slot
+ * opened that slot. Both are things a menu must never do, and neither is fixable
+ * from this side of the bridge.
  *
- * Falls back to an alert off iOS, where ActionSheetIOS does not exist.
+ * So: a Modal, which captures every touch by construction, holding the same
+ * shapes iOS uses — a grouped card of actions, destructive in red, and Cancel on
+ * its own card below. One sheet exists at a time; asking for another simply
+ * replaces it, which means there is no presentation race to serialise and no
+ * flag that can get stuck and lock out every later menu.
+ *
+ * `sheet()` is callable from anywhere; SheetHost renders it, mounted once at the
+ * app root.
  */
-// iOS will not present a second sheet while the first is still dismissing — it
-// drops it, which looks exactly like a menu that flashes open and shuts again.
-// So they are serialised: one waits for the previous callback plus the length of
-// the dismissal animation.
-//
-// The guard timer matters more than it looks. If a sheet is torn down without its
-// callback ever firing — the screen underneath navigating away, for instance —
-// the busy flag would stay set for the life of the process and EVERY menu in the
-// app would silently queue instead of opening. The timer unsticks it.
-let sheetBusy = false;
-let sheetQueued: (() => void) | null = null;
-let sheetGuard: ReturnType<typeof setTimeout> | null = null;
+export type SheetRequest = { title?: string; message?: string; options: SheetOption[] };
 
-function releaseSheet() {
-  if (sheetGuard) { clearTimeout(sheetGuard); sheetGuard = null; }
-  sheetBusy = false;
-  const next = sheetQueued;
-  sheetQueued = null;
-  next?.();
+let deliver: ((r: SheetRequest | null) => void) | null = null;
+
+export function sheet(request: SheetRequest) {
+  deliver?.(request);
 }
 
-export function sheet(opts: { title?: string; message?: string; options: SheetOption[] }) {
-  if (sheetBusy) { sheetQueued = () => sheet(opts); return; }
-  const { title, message, options } = opts;
-  if (Platform.OS !== 'ios') {
-    Alert.alert(title ?? '', message, [
-      ...options.map((o) => ({
-        text: o.label,
-        style: o.destructive ? ('destructive' as const) : undefined,
-        onPress: o.onPress,
-      })),
-      { text: 'Cancel', style: 'cancel' as const },
-    ]);
-    return;
-  }
-  const labels = [...options.map((o) => o.label), 'Cancel'];
-  const destructive = options.findIndex((o) => o.destructive);
-  sheetBusy = true;
-  sheetGuard = setTimeout(releaseSheet, 5000);
-  ActionSheetIOS.showActionSheetWithOptions(
-    {
-      title, message,
-      options: labels,
-      cancelButtonIndex: labels.length - 1,
-      ...(destructive >= 0 ? { destructiveButtonIndex: destructive } : {}),
-      userInterfaceStyle: 'dark',
-    },
-    (i) => {
-      // Let the panel finish sliding away before anything else is presented, and
-      // before the chosen action runs — several of them open a picker, which is
-      // the same collision one step later.
-      setTimeout(() => {
-        options[i]?.onPress?.();
-        releaseSheet();
-      }, 320);
-    },
+export function SheetHost() {
+  const insets = useSafeAreaInsets();
+  const [req, setReq] = React.useState<SheetRequest | null>(null);
+  React.useEffect(() => {
+    deliver = setReq;
+    return () => { deliver = null; };
+  }, []);
+
+  const close = () => setReq(null);
+  const pick = (o: SheetOption) => {
+    setReq(null);
+    // After the modal is down, so an action that opens a picker is not fighting
+    // a dismissal.
+    setTimeout(() => o.onPress?.(), 60);
+  };
+
+  return (
+    <Modal visible={!!req} transparent animationType="fade" onRequestClose={close}
+      statusBarTranslucent>
+      <Pressable style={S.sheetDim} onPress={close}>
+        {/* Stops a tap inside the sheet from reaching the dimmer behind it. */}
+        {/* Clear of the home indicator, whatever the device. */}
+        <Pressable style={[S.sheetBody, { paddingBottom: insets.bottom + 8 }]} onPress={() => {}}>
+          <View style={S.sheetCard}>
+            {req?.title || req?.message ? (
+              <View style={S.sheetHead}>
+                {req?.title ? <Text style={S.sheetTitle}>{req.title}</Text> : null}
+                {req?.message ? <Text style={S.sheetMessage}>{req.message}</Text> : null}
+              </View>
+            ) : null}
+            {(req?.options ?? []).map((o, i) => (
+              <React.Fragment key={o.label}>
+                {i > 0 || req?.title || req?.message ? <View style={S.sheetLine} /> : null}
+                <Pressable
+                  onPress={() => pick(o)}
+                  style={({ pressed }) => [S.sheetItem, pressed && { backgroundColor: C.surface2 }]}
+                >
+                  <Text style={[S.sheetItemTxt, o.destructive && { color: C.bad }]}>{o.label}</Text>
+                </Pressable>
+              </React.Fragment>
+            ))}
+          </View>
+
+          <Pressable
+            onPress={close}
+            style={({ pressed }) => [S.sheetCard, S.sheetItem, pressed && { backgroundColor: C.surface2 }]}
+          >
+            <Text style={[S.sheetItemTxt, { fontWeight: '700' }]}>Cancel</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -253,6 +264,20 @@ export const S = StyleSheet.create({
   rowValue: { color: C.muted, fontSize: 16, maxWidth: '45%' },
   // Inset to the label, not the card edge — the iOS convention.
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: C.line, marginLeft: 16 },
+
+  // The sheet. Sized and spaced to iOS's own: 17pt actions on ~57pt rows, two
+  // grouped cards with the cancel apart, and hairlines between the choices.
+  sheetDim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheetBody: { padding: 8, gap: 8 },
+  sheetCard: {
+    backgroundColor: C.surface, borderRadius: 14, ...CORNER, overflow: 'hidden',
+  },
+  sheetHead: { paddingHorizontal: 16, paddingVertical: 14, alignItems: 'center', gap: 3 },
+  sheetTitle: { color: C.text, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  sheetMessage: { color: C.muted, fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  sheetLine: { height: StyleSheet.hairlineWidth, backgroundColor: C.line },
+  sheetItem: { minHeight: 57, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  sheetItemTxt: { color: C.accent, fontSize: 17, fontWeight: '500', textAlign: 'center' },
 
   h2: { fontSize: 20, fontWeight: '700', color: C.text },
   muted: { color: C.muted, fontWeight: '600' },

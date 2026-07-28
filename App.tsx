@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { C } from './src/theme';
+import { SheetHost } from './src/ui';
 import { initStorage } from './src/storage';
 import { importWastickers, isWastickersFile, archiveKind } from './src/wastickers';
 import { importPacksFromZip } from './src/backup';
@@ -100,6 +101,8 @@ export default function App() {
             <EditorScreen nav={nav} stickerId={route.stickerId} packName={route.packName} />
           )}
         </View>
+        {/* One sheet host for the whole app, above every screen. */}
+        <SheetHost />
       </GestureHandlerRootView>
     </SafeAreaProvider>
   );
