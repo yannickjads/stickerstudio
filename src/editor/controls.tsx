@@ -40,7 +40,9 @@ export function Segmented<T extends string>({
       }}
       appearance="dark"
       tintColor={C.accent}
-      backgroundColor={C.surface2}
+      // No backgroundColor: that paints the VIEW's rectangle, which shows up as
+      // square corners behind the control's own rounded track. iOS draws the
+      // track itself, correctly, in the dark appearance.
       fontStyle={{ color: C.text, fontWeight: '600' }}
       activeFontStyle={{ color: C.ink, fontWeight: '700' }}
       style={{ height: 34 }}
