@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, LayoutChangeEvent } from 'react-native';
+import React from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import NativeSlider from '@react-native-community/slider';
 import { C } from '../theme';
 
 export type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -19,20 +19,32 @@ export function ToolButton({
   );
 }
 
+/**
+ * Apple's own UISegmentedControl rather than a row of pressables dressed up as
+ * one. It brings the sliding selection, the press states, the font metrics and
+ * the accessibility behaviour for free — all of which a hand-built copy only
+ * ever approximates.
+ */
 export function Segmented<T extends string>({
   options, value, onChange,
 }: { options: { value: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+  const index = Math.max(0, options.findIndex((o) => o.value === value));
   return (
-    <View style={cs.segment}>
-      {options.map((o) => {
-        const on = o.value === value;
-        return (
-          <Pressable key={o.value} onPress={() => onChange(o.value)} style={[cs.segItem, on && cs.segItemOn]}>
-            <Text style={[cs.segTxt, on && cs.segTxtOn]}>{o.label}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
+    <SegmentedControl
+      values={options.map((o) => o.label)}
+      selectedIndex={index}
+      onChange={(e) => {
+        const i = e.nativeEvent.selectedSegmentIndex;
+        const picked = options[i];
+        if (picked) onChange(picked.value);
+      }}
+      appearance="dark"
+      tintColor={C.accent}
+      backgroundColor={C.surface2}
+      fontStyle={{ color: C.text, fontWeight: '600' }}
+      activeFontStyle={{ color: C.ink, fontWeight: '700' }}
+      style={{ height: 34 }}
+    />
   );
 }
 
@@ -53,38 +65,27 @@ export function SwatchRow({
   );
 }
 
-// Self-contained horizontal slider (no native module). Reports value on drag.
+/**
+ * Apple's UISlider. The hand-rolled one it replaces had to reimplement the thumb,
+ * the tap-to-jump, the hit slop and the drag tracking; this gets all of it, plus
+ * the system's own feel under the finger.
+ */
 export function Slider({
   value, min, max, onChange, onStart, format,
 }: { value: number; min: number; max: number; onChange: (v: number) => void; onStart?: () => void; format?: (v: number) => string }) {
-  const [w, setW] = useState(0);
-  const onLayout = (e: LayoutChangeEvent) => setW(e.nativeEvent.layout.width);
-  const frac = max > min ? (value - min) / (max - min) : 0;
-
-  // Single gesture: onBegin fires on touch-down (tap OR drag start) → one history
-  // push + initial value; onUpdate tracks the drag. No separate Tap gesture, so one
-  // interaction can never double-push history.
-  const begin = (x: number) => { onStart?.(); setFromX(x); };
-  const setFromX = (x: number) => {
-    if (w <= 0) return;
-    const f = Math.min(Math.max(x / w, 0), 1);
-    onChange(min + f * (max - min));
-  };
-  const pan = Gesture.Pan()
-    .minDistance(1)
-    .onBegin((e) => { 'worklet'; runOnJS(begin)(e.x); })
-    .onUpdate((e) => { 'worklet'; runOnJS(setFromX)(e.x); });
-
   return (
     <View style={cs.sliderWrap}>
-      <GestureDetector gesture={pan}>
-        <View style={cs.sliderHit} onLayout={onLayout}>
-          <View style={cs.track}>
-            <View style={[cs.fill, { width: `${frac * 100}%` }]} />
-            <View style={[cs.thumb, { left: `${frac * 100}%` }]} />
-          </View>
-        </View>
-      </GestureDetector>
+      <NativeSlider
+        style={cs.sliderHit}
+        value={value}
+        minimumValue={min}
+        maximumValue={max}
+        onSlidingStart={onStart}
+        onValueChange={onChange}
+        minimumTrackTintColor={C.accent}
+        maximumTrackTintColor={C.surface3}
+        thumbTintColor="#ffffff"
+      />
       {format ? <Text style={cs.sliderVal}>{format(value)}</Text> : null}
     </View>
   );
@@ -95,21 +96,12 @@ const cs = StyleSheet.create({
   toolActive: { backgroundColor: C.accent },
   toolLabel: { fontSize: 11, fontWeight: '700' },
 
-  segment: { flexDirection: 'row', backgroundColor: C.surface2, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: C.line },
-  segItem: { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 9 },
-  segItemOn: { backgroundColor: C.accent },
-  segTxt: { color: C.text, fontWeight: '700', fontSize: 13 },
-  segTxtOn: { color: C.ink },
-
   swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
   swatch: { width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: C.line },
   none: { backgroundColor: C.surface2, alignItems: 'center', justifyContent: 'center' },
   swatchOn: { borderColor: C.accent, transform: [{ scale: 1.12 }] },
 
   sliderWrap: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  sliderHit: { flex: 1, height: 40, justifyContent: 'center' },
-  track: { height: 6, borderRadius: 3, backgroundColor: C.surface3 },
-  fill: { position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 3, backgroundColor: C.accent },
-  thumb: { position: 'absolute', top: -8, width: 22, height: 22, borderRadius: 11, marginLeft: -11, backgroundColor: '#fff', borderWidth: 3, borderColor: C.accent },
+  sliderHit: { flex: 1, height: 40 },
   sliderVal: { color: C.text, fontWeight: '700', fontSize: 13, width: 44, textAlign: 'right', fontVariant: ['tabular-nums'] },
 });

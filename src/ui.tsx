@@ -104,7 +104,15 @@ export type SheetOption = {
  *
  * Falls back to an alert off iOS, where ActionSheetIOS does not exist.
  */
+// iOS will not present a second sheet while the first is still dismissing — it
+// drops it, which looks exactly like a menu that flashes open and shuts again.
+// So they are serialised: one waits for the previous callback plus the length of
+// the dismissal animation.
+let sheetBusy = false;
+let sheetQueued: (() => void) | null = null;
+
 export function sheet(opts: { title?: string; message?: string; options: SheetOption[] }) {
+  if (sheetBusy) { sheetQueued = () => sheet(opts); return; }
   const { title, message, options } = opts;
   if (Platform.OS !== 'ios') {
     Alert.alert(title ?? '', message, [
@@ -119,6 +127,7 @@ export function sheet(opts: { title?: string; message?: string; options: SheetOp
   }
   const labels = [...options.map((o) => o.label), 'Cancel'];
   const destructive = options.findIndex((o) => o.destructive);
+  sheetBusy = true;
   ActionSheetIOS.showActionSheetWithOptions(
     {
       title, message,
@@ -127,7 +136,17 @@ export function sheet(opts: { title?: string; message?: string; options: SheetOp
       ...(destructive >= 0 ? { destructiveButtonIndex: destructive } : {}),
       userInterfaceStyle: 'dark',
     },
-    (i) => { options[i]?.onPress?.(); },
+    (i) => {
+      // Let the panel finish sliding away before anything else is presented,
+      // and before the chosen action runs — several of them open a picker.
+      setTimeout(() => {
+        sheetBusy = false;
+        options[i]?.onPress?.();
+        const next = sheetQueued;
+        sheetQueued = null;
+        next?.();
+      }, 320);
+    },
   );
 }
 

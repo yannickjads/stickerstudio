@@ -26,7 +26,7 @@ import {
 } from '../editor/renderVideo';
 import { videoInfo, extractFrames } from '../../modules/video-frames';
 import CropOverlay from '../editor/CropOverlay';
-import { Slider } from '../editor/controls';
+import { Segmented, Slider } from '../editor/controls';
 import {
   centredRect, toPixels, fromPixels, type Aspect, type NRect,
 } from '../editor/cropGeometry';
@@ -494,52 +494,41 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
 
         {/* Shape sits with the picture, not buried in a sheet: it changes what you
             are looking at. */}
-        <View style={[st.clipHead, { paddingHorizontal: EDGE, marginTop: 14 }]}>
-          <Text style={st.fpsLabel}>Shape</Text>
-          <View style={st.lengths}>
-            {([['square', 'Square'], ['original', 'Original'], ['free', 'Freeform']] as const).map(([v, label]) => {
-              const on = customAr == null && aspect === v;
-              return (
-                <Pressable
-                  key={v}
-                  onPress={() => {
-                    setAspect(v); setCustomAr(null); dropPreview();
-                    // Freeform keeps whatever is on screen — there is no ratio to
-                    // impose — while the other two re-fit the crop to their shape.
-                    if (v !== 'free') {
-                      setRect(centredRect(v === 'original' ? cur.w / cur.h : 1, cur.w, cur.h));
-                    }
-                  }}
-                  style={[st.length, on && st.lengthOn]}>
-                  <Text style={[st.lengthTxt, on && st.lengthTxtOn]}>{label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+        <View style={{ paddingHorizontal: EDGE, marginTop: 14 }}>
+          <Segmented
+            options={[
+              { value: 'square', label: 'Square' },
+              { value: 'original', label: 'Original' },
+              { value: 'free', label: 'Freeform' },
+            ]}
+            value={customAr != null ? 'free' : aspect}
+            onChange={(v) => {
+              setAspect(v); setCustomAr(null); dropPreview();
+              // Freeform keeps whatever is on screen — there is no ratio to
+              // impose — while the other two re-fit the crop to their shape.
+              if (v !== 'free') {
+                setRect(centredRect(v === 'original' ? cur.w / cur.h : 1, cur.w, cur.h));
+              }
+            }}
+          />
         </View>
 
         {cur.video ? (
           <View style={st.clip}>
-            {/* One row: what you're taking, and how much of it. */}
-            <View style={st.clipHead}>
-              <Text style={st.clipRange}>
-                {(startMs / 1000).toFixed(1)}–{((startMs + effClip(cur)) / 1000).toFixed(1)}s
-              </Text>
-              <View style={st.lengths}>
-                {[1000, 2000, 3000, 5000, MAX_CLIP_MS].map((ms) => {
-                  const on = clipMs === ms;
-                  const can = cur.video!.durationMs >= ms;
-                  return (
-                    <Pressable key={ms} onPress={() => { if (can) { setClipMs(ms); dropPreview(); } }} disabled={!can}
-                      style={[st.length, on && st.lengthOn]}>
-                      <Text style={[st.lengthTxt, on && st.lengthTxtOn, !can && { opacity: 0.3 }]}>
-                        {ms / 1000}s
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
+            {/* What you're taking, and how much of it. Lengths the clip is too
+                short for are left out rather than shown greyed: a segmented
+                control has no disabled segment, and an option you cannot pick is
+                noise either way. */}
+            <Text style={st.clipRange}>
+              {(startMs / 1000).toFixed(1)}–{((startMs + effClip(cur)) / 1000).toFixed(1)}s
+            </Text>
+            <Segmented
+              options={[1000, 2000, 3000, 5000, MAX_CLIP_MS]
+                .filter((ms) => cur.video!.durationMs >= ms || ms === 1000)
+                .map((ms) => ({ value: String(ms), label: `${ms / 1000}s` }))}
+              value={String(clipMs)}
+              onChange={(v) => { setClipMs(Number(v)); dropPreview(); }}
+            />
 
             <Slider
               value={startMs}
@@ -551,17 +540,12 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
 
             {/* Frame rate is its own choice: it trades against length and colours,
                 and which one to spend the 500 KB on depends on the clip. */}
-            <View style={st.clipHead}>
-              <Text style={st.fpsLabel}>Frames per second</Text>
-              <View style={st.lengths}>
-                {FPS_CHOICES.map((n) => (
-                  <Pressable key={n} onPress={() => { setFps(n); dropPreview(); }}
-                    style={[st.length, fps === n && st.lengthOn]}>
-                    <Text style={[st.lengthTxt, fps === n && st.lengthTxtOn]}>{n}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
+            <Text style={st.fpsLabel}>Frames per second</Text>
+            <Segmented
+              options={FPS_CHOICES.map((n) => ({ value: String(n), label: String(n) }))}
+              value={String(fps)}
+              onChange={(v) => { setFps(Number(v)); dropPreview(); }}
+            />
 
             <Btn label={preview ? 'Render again' : 'Preview'} kind="ghost"
               onPress={() => makePreview(cur)} disabled={busy} />
@@ -606,16 +590,15 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
 
 const st = StyleSheet.create({
   clip: { paddingHorizontal: EDGE, marginTop: 18, gap: 12 },
-  clipHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  clipRange: { color: C.text, fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  // Segmented control, iOS style: one track, the selection slides inside it.
-  lengths: {
-    flexDirection: 'row', backgroundColor: C.surface2, borderRadius: 9,
-    borderCurve: 'continuous', padding: 2,
+  clipRange: { color: C.text, fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'], textAlign: 'center' },
+  optionsRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: EDGE, marginTop: 14, paddingVertical: 6,
   },
-  length: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 7, borderCurve: 'continuous' },
+  optionsTxt: { color: C.muted, fontSize: 14, fontWeight: '500' },
   fpsLabel: { color: C.muted, fontSize: 14, fontWeight: '600' },
   sizeNote: { color: C.muted, fontSize: 12, textAlign: 'center', lineHeight: 16, marginTop: -4 },
+  // The rendered clip, shown over the picture it came from.
   previewWrap: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 14,
     borderCurve: 'continuous', overflow: 'hidden', backgroundColor: C.surface2,
@@ -626,14 +609,6 @@ const st = StyleSheet.create({
     borderRadius: 999, backgroundColor: 'rgba(10,12,18,0.72)',
   },
   previewTagTxt: { color: C.text, fontSize: 12, fontWeight: '600' },
-  lengthOn: { backgroundColor: C.accent },
-  lengthTxt: { color: C.text, fontSize: 13, fontWeight: '600' },
-  lengthTxtOn: { color: C.ink },
-  optionsRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: EDGE, marginTop: 14, paddingVertical: 6,
-  },
-  optionsTxt: { color: C.muted, fontSize: 14, fontWeight: '500' },
   splitNote: {
     color: C.accent2, fontSize: 12, fontWeight: '600',
     paddingHorizontal: EDGE, marginTop: 14, textAlign: 'center',

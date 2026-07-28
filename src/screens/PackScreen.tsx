@@ -63,6 +63,10 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
   useEffect(() => { load(); }, [load]);
 
   // With a tray image of its own, no sticker is the icon — the star would lie.
+  const cover = pack?.trayUri
+    ?? (stickers.find((s) => s.id === pack?.coverStickerId) ?? stickers[0])?.uri
+    ?? null;
+
   const isCover = (s: Sticker) => !pack?.trayUri && pack?.coverStickerId === s.id;
 
   // Tapping a sticker opens it. Everything you can do to one sticker lives there,
@@ -186,6 +190,21 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     }
   };
 
+  // Everything about the pack's icon, reached by tapping the icon itself.
+  const iconMenu = () => {
+    Haptics.selectionAsync();
+    sheet({
+      title: 'Pack icon',
+      message: pack?.trayUri
+        ? 'Shown in WhatsApp, Telegram and wherever this pack is shared.'
+        : 'Currently a sticker from the pack. Open any sticker to pick a different one.',
+      options: [
+        { label: pack?.trayUri ? 'Choose a different photo…' : 'Choose a photo…', onPress: chooseTray },
+        ...(pack?.trayUri ? [{ label: 'Use a sticker instead', onPress: clearTray }] : []),
+      ],
+    });
+  };
+
   const clearTray = async () => {
     await setPackTrayImage(packId, null);
     load();
@@ -236,11 +255,6 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
       message: pack?.author ? `by ${pack.author}` : undefined,
       options: [
         { label: 'Edit name & author', onPress: editPack },
-        {
-          label: pack?.trayUri ? 'Change pack icon…' : 'Pack icon from a photo…',
-          onPress: chooseTray,
-        },
-        ...(pack?.trayUri ? [{ label: 'Use a sticker as the icon instead', onPress: clearTray }] : []),
         ...(hasStickers ? [
           { label: 'Back up pack (.zip)', onPress: exportPack },
           { label: 'Add to Telegram', onPress: sendToTelegram },
@@ -280,9 +294,30 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
         right={<NavCircle icon="ellipsis-horizontal" onPress={packMenu} disabled={busy || waBusy} />} />
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
-        <Text style={styles.capacity}>
-          {stickers.length} of {PACK_MAX}{full ? ' · pack full' : ''}
-        </Text>
+        {/* The pack's icon, shown rather than buried in a menu — it is a visible
+            property of the pack, so it belongs where you can see it and tap it.
+            The label underneath says what it is, so nobody has to guess. */}
+        <Pressable style={styles.identity} onPress={iconMenu} disabled={locked}>
+          <View style={styles.iconWrap}>
+            {cover ? (
+              <Image source={{ uri: cover }} style={styles.iconImg} contentFit="cover"
+                cachePolicy="none" transition={140} />
+            ) : (
+              <Ionicons name="image-outline" size={22} color={C.muted} />
+            )}
+            <View style={styles.iconEdit}>
+              <Ionicons name="pencil" size={11} color={C.ink} />
+            </View>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.identityLabel}>Pack icon</Text>
+            <Text style={styles.capacityInline}>
+              {stickers.length} of {PACK_MAX}{full ? ' · pack full' : ''}
+              {pack?.author ? ` · by ${pack.author}` : ''}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={C.muted} />
+        </Pressable>
 
         <View style={styles.grid}>
           {Array.from({ length: PACK_MAX }, (_, i) => {
@@ -329,10 +364,24 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
 
 const styles = StyleSheet.create({
   scroll: { paddingBottom: 24 },
-  capacity: {
-    color: C.muted, fontSize: 13, fontWeight: '500',
-    paddingHorizontal: EDGE, paddingBottom: 12,
+  identity: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: EDGE, marginBottom: 16, padding: 10,
+    backgroundColor: C.surface, borderRadius: 14, borderCurve: 'continuous',
   },
+  iconWrap: {
+    width: 52, height: 52, borderRadius: 12, borderCurve: 'continuous',
+    backgroundColor: C.surface2, alignItems: 'center', justifyContent: 'center',
+    overflow: 'visible',
+  },
+  iconImg: { width: 52, height: 52, borderRadius: 12 },
+  iconEdit: {
+    position: 'absolute', right: -4, bottom: -4, width: 20, height: 20, borderRadius: 10,
+    backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: C.surface,
+  },
+  identityLabel: { color: C.text, fontSize: 16, fontWeight: '600' },
+  capacityInline: { color: C.muted, fontSize: 13, marginTop: 2 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingHorizontal: EDGE },
   // Square tiles — stickers are shown exactly as they'll be used, uncropped by
   // any corner rounding.
