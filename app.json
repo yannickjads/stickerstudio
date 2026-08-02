@@ -85,6 +85,7 @@
         "iosActivationRules": {
           "NSExtensionActivationSupportsImageWithMaxCount": 10
         },
+        "iosAppGroupIdentifier": "group.com.yannick.stickerstudio",
         "androidIntentFilters": ["image/*"],
         "androidMultiIntentFilters": ["image/*"]
       }]
