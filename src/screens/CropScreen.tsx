@@ -44,7 +44,9 @@ const EDGE = 20;
 const STAGE_W = SCREEN_W - EDGE * 2;
 const STAGE_H = Math.max(260, Math.min(SCREEN_H * 0.56, 520));
 
-export default function CropScreen({ nav, packId, packName, startSlot, editStickerId, source = 'photos' }: { nav: Nav; packId: string; packName: string; startSlot?: number; editStickerId?: string; source?: MediaSource }) {
+type SharedUri = { uri: string; w: number; h: number };
+
+export default function CropScreen({ nav, packId, packName, startSlot, editStickerId, source = 'photos', sharedUris }: { nav: Nav; packId: string; packName: string; startSlot?: number; editStickerId?: string; source?: MediaSource; sharedUris?: SharedUri[] }) {
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<Item[] | null>(null);
   const [index, setIndex] = useState(0);
@@ -144,6 +146,13 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   useEffect(() => {
     if (editing || launched.current) return;
     launched.current = true;
+    if (sharedUris?.length) {
+      setItems(sharedUris.map((s, i) => ({
+        id: `${Date.now()}-${i}`, uri: s.uri, w: s.w, h: s.h,
+        maybeAnimated: maybeAnimatedSource(s.uri, null),
+      })));
+      return;
+    }
     (async () => {
       // A file picked out of Files has no dimensions attached, so it is measured
       // once here; the photo picker supplies them.

@@ -3,12 +3,16 @@ import { View, ActivityIndicator, Alert, Linking } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useShareIntent } from 'expo-share-intent';
 import { C } from './src/theme';
-import { SheetHost } from './src/ui';
+import { sheet, SheetHost } from './src/ui';
 import { initStorage } from './src/storage';
 import { importWastickers, isWastickersFile, archiveKind } from './src/wastickers';
 import { importPacksFromZip } from './src/backup';
+import { listPacks, createPack } from './src/db';
+import { nativePrompt } from './modules/native-prompt';
 import { PACK_MAX } from './src/types';
+import type { Pack } from './src/types';
 import type { Route, Nav } from './src/nav';
 import PacksScreen from './src/screens/PacksScreen';
 import PackScreen from './src/screens/PackScreen';
@@ -22,10 +26,54 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [reload, setReload] = useState(0);
   const handling = useRef(false);
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
 
   useEffect(() => {
     initStorage().then(() => setReady(true)).catch(() => setReady(true));
   }, []);
+
+  useEffect(() => {
+    if (!hasShareIntent || !ready) return;
+    const files = shareIntent?.files?.filter((f) => f.mimeType?.startsWith('image/'));
+    if (!files?.length) { resetShareIntent(); return; }
+    const shared = files.map((f) => ({
+      uri: f.path, w: f.width || 512, h: f.height || 512,
+    }));
+    const pickPack = async () => {
+      await initStorage();
+      const packs = await listPacks();
+      const goToCrop = (pack: Pack) => {
+        resetShareIntent();
+        setStack([
+          { name: 'packs' },
+          { name: 'pack', packId: pack.id, packName: pack.name },
+          { name: 'crop', packId: pack.id, packName: pack.name, sharedUris: shared },
+        ]);
+      };
+      const makeNew = async () => {
+        const r = await nativePrompt({
+          title: 'New pack',
+          fields: [{ placeholder: 'Name' }, { placeholder: 'Author' }],
+          confirmText: 'Create',
+        });
+        if (!r) { resetShareIntent(); return; }
+        const p = await createPack(r[0], r[1] ?? '');
+        goToCrop(p);
+      };
+      sheet({
+        title: `Add to pack`,
+        message: `${shared.length} image${shared.length === 1 ? '' : 's'}`,
+        options: [
+          ...packs.map((p) => ({
+            label: p.name,
+            onPress: () => goToCrop(p),
+          })),
+          { label: 'New pack', onPress: makeNew },
+        ],
+      });
+    };
+    pickPack();
+  }, [hasShareIntent, ready]);
 
   // Opening a .wastickers pack (or one of our .zip backups) from Files, Mail or
   // AirDrop hands the app a file:// url — import it and land on the packs list.
@@ -92,7 +140,8 @@ export default function App() {
             <PackScreen nav={nav} packId={route.packId} packName={route.packName} />
           ) : route.name === 'crop' ? (
             <CropScreen nav={nav} packId={route.packId} packName={route.packName}
-              startSlot={route.startSlot} editStickerId={route.editStickerId} source={route.source} />
+              startSlot={route.startSlot} editStickerId={route.editStickerId} source={route.source}
+              sharedUris={route.sharedUris} />
           ) : route.name === 'sticker' ? (
             <StickerScreen nav={nav} stickerId={route.stickerId} packId={route.packId} packName={route.packName} />
           ) : route.name === 'cutout' ? (

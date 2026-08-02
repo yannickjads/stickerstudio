@@ -14,6 +14,7 @@ export type Route =
   | {
       name: 'crop'; packId: string; packName: string; startSlot?: number;
       editStickerId?: string; source?: MediaSource;
+      sharedUris?: Array<{ uri: string; w: number; h: number }>;
     }
   | { name: 'sticker'; stickerId: string; packId: string; packName: string }
   // The result comes back through the callback: the screen that opened it decides
