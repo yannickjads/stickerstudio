@@ -131,30 +131,90 @@ jobs:
           install_profile "App" "$PROFILE_BASE64" PROFILE_UUID
           install_profile "ShareExtension" "$SHARE_PROFILE_BASE64" SHARE_PROFILE_UUID
 
-      # Each target needs its own provisioning profile. The main app target uses
-      # PROFILE_UUID and the share extension uses SHARE_PROFILE_UUID. Patch the
-      # generated Xcode project so xcodebuild picks the right one per target.
+      # Each target needs its own provisioning profile. Expo prebuild generates
+      # the project with empty specifiers and the share extension target may be
+      # missing its bundle ID. Patch them all in one reliable pass.
       - name: Assign provisioning profiles to targets
         run: |
           PBXPROJ=$(ls ios/*.xcodeproj/project.pbxproj | head -1)
-          # Set manual signing and the correct profile for the main target
-          sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = \"\"/PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"/g" "$PBXPROJ"
-          # The share extension target gets its own profile
-          python3 - "$PBXPROJ" "$PROFILE_UUID" "$SHARE_PROFILE_UUID" <<'PYEOF'
+          python3 - "$PBXPROJ" "$PROFILE_UUID" "$SHARE_PROFILE_UUID" "$BUNDLE_ID" "$TEAM_ID" <<'PYEOF'
           import sys, re
-          path, app_uuid, ext_uuid = sys.argv[1], sys.argv[2], sys.argv[3]
+
+          path = sys.argv[1]
+          app_profile = sys.argv[2]
+          ext_profile = sys.argv[3]
+          bundle_id = sys.argv[4]
+          team_id = sys.argv[5]
+          ext_bundle_id = bundle_id + ".share-extension"
+
           with open(path) as f:
-              content = f.read()
-          # Find ShareExtension build config sections and replace the profile UUID
-          # The share extension target's build settings reference its own bundle ID
-          parts = content.split('com.yannick.stickerstudio.share-extension')
-          for i in range(1, len(parts)):
-              parts[i] = parts[i].replace(app_uuid, ext_uuid, 2)
-          content = ''.join(parts)
+              text = f.read()
+
+          # Split into build configuration blocks (each ends at "};")
+          # and patch them based on which target they belong to.
+          # Strategy: find every buildSettings block. If it contains the
+          # extension's bundle ID or product name "ShareExtension", use
+          # the extension profile. Otherwise use the app profile.
+
+          def patch_build_settings(m):
+              block = m.group(0)
+              is_ext = "ShareExtension" in block or ext_bundle_id in block
+
+              profile = ext_profile if is_ext else app_profile
+              bid = ext_bundle_id if is_ext else None
+
+              # Set PROVISIONING_PROFILE_SPECIFIER
+              if "PROVISIONING_PROFILE_SPECIFIER" in block:
+                  block = re.sub(
+                      r'PROVISIONING_PROFILE_SPECIFIER = "[^"]*"',
+                      f'PROVISIONING_PROFILE_SPECIFIER = "{profile}"',
+                      block)
+              else:
+                  block = block.replace(
+                      "buildSettings = {",
+                      f'buildSettings = {{\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "{profile}";', 1)
+
+              # Set CODE_SIGN_STYLE = Manual
+              if "CODE_SIGN_STYLE" in block:
+                  block = re.sub(
+                      r'CODE_SIGN_STYLE = \w+',
+                      'CODE_SIGN_STYLE = Manual',
+                      block)
+              else:
+                  block = block.replace(
+                      "buildSettings = {",
+                      'buildSettings = {\n\t\t\t\tCODE_SIGN_STYLE = Manual;', 1)
+
+              # Set DEVELOPMENT_TEAM
+              if "DEVELOPMENT_TEAM" in block:
+                  block = re.sub(
+                      r'DEVELOPMENT_TEAM = "[^"]*"',
+                      f'DEVELOPMENT_TEAM = "{team_id}"',
+                      block)
+                  block = re.sub(
+                      r'DEVELOPMENT_TEAM = \w+',
+                      f'DEVELOPMENT_TEAM = {team_id}',
+                      block)
+
+              # Ensure share extension has its bundle ID
+              if is_ext and "PRODUCT_BUNDLE_IDENTIFIER" not in block:
+                  block = block.replace(
+                      "buildSettings = {",
+                      f'buildSettings = {{\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = "{ext_bundle_id}";', 1)
+
+              return block
+
+          text = re.sub(
+              r'buildSettings = \{[^}]*\}',
+              patch_build_settings,
+              text,
+              flags=re.DOTALL)
+
           with open(path, 'w') as f:
-              f.write(content)
+              f.write(text)
+
+          print("Patched provisioning profiles and bundle IDs")
           PYEOF
-          echo "Patched provisioning profiles in $PBXPROJ"
 
       - name: Archive
         run: |
