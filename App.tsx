@@ -5,12 +5,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useShareIntent } from 'expo-share-intent';
 import { C } from './src/theme';
-import { sheet, SheetHost } from './src/ui';
 import { initStorage } from './src/storage';
 import { importWastickers, isWastickersFile, archiveKind } from './src/wastickers';
 import { importPacksFromZip } from './src/backup';
 import { listPacks, createPack } from './src/db';
-import { nativePrompt } from './modules/native-prompt';
+import { nativePrompt, nativeActionSheet } from './modules/native-prompt';
 import { PACK_MAX } from './src/types';
 import type { Pack } from './src/types';
 import type { Route, Nav } from './src/nav';
@@ -50,17 +49,18 @@ export default function App() {
           { name: 'crop', packId: pack.id, packName: pack.name, sharedUris: shared },
         ]);
       };
+      const lastAuthor = packs.find((p) => p.author)?.author ?? '';
       const makeNew = async () => {
         const r = await nativePrompt({
           title: 'New pack',
-          fields: [{ placeholder: 'Name' }, { placeholder: 'Author' }],
+          fields: [{ placeholder: 'Name' }, { placeholder: 'Author', value: lastAuthor }],
           confirmText: 'Create',
         });
         if (!r) { resetShareIntent(); return; }
         const p = await createPack(r[0], r[1] ?? '');
         goToCrop(p);
       };
-      sheet({
+      nativeActionSheet({
         title: `Add to pack`,
         message: `${shared.length} image${shared.length === 1 ? '' : 's'}`,
         options: [
@@ -150,8 +150,6 @@ export default function App() {
             <EditorScreen nav={nav} stickerId={route.stickerId} packName={route.packName} />
           )}
         </View>
-        {/* One sheet host for the whole app, above every screen. */}
-        <SheetHost />
       </GestureHandlerRootView>
     </SafeAreaProvider>
   );

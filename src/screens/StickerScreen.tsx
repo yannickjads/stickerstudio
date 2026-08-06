@@ -129,7 +129,7 @@ export default function StickerScreen({
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
       <Header title={packName} onBack={busy ? undefined : nav.pop} />
 
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 28 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
         <View style={st.preview}>
           <Checkerboard size={BOX} />
           {gone ? null : (

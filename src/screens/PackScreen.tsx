@@ -7,7 +7,7 @@ import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { C } from '../theme';
-import { Btn, Header, NavCircle, Sym, sheet, S, EDGE } from '../ui';
+import { Btn, Header, NavCircle, Sym, S, EDGE } from '../ui';
 import type { Nav, MediaSource } from '../nav';
 import type { Pack, Sticker } from '../types';
 import { PACK_MAX } from '../types';
@@ -15,7 +15,7 @@ import {
   listStickers, getPack, ensurePackSlots, updatePack, deletePack, getPackTrayUri,
   setPackTrayImage,
 } from '../db';
-import { nativePrompt } from '../../modules/native-prompt';
+import { nativePrompt, nativeActionSheet } from '../../modules/native-prompt';
 import { deleteFile } from '../storage';
 import { renderCroppedPng, ensureDecodableUri, loadSkImage } from '../editor/renderCrop';
 import { buildWhatsAppPayload, isAnimatedSticker, WA_MIN_STICKERS } from '../editor/whatsappExport';
@@ -104,7 +104,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
   const addAt = (slot: number) => {
     const go = (source: MediaSource) =>
       nav.push({ name: 'crop', packId, packName: name, startSlot: slot, source });
-    sheet({
+    nativeActionSheet({
       title: 'New sticker',
       options: [
         { label: 'Photo or GIF', onPress: () => go('photos') },
@@ -192,7 +192,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
   // Everything about the pack's icon, reached by tapping the icon itself.
   const iconMenu = () => {
     Haptics.selectionAsync();
-    sheet({
+    nativeActionSheet({
       title: 'Pack icon',
       message: pack?.trayUri
         ? 'Shown in WhatsApp, Telegram and wherever this pack is shared.'
@@ -249,7 +249,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
     const hasStickers = stickers.length > 0;
     // Renaming and deleting must stay reachable for an empty pack — only the
     // export actions depend on there being stickers.
-    sheet({
+    nativeActionSheet({
       title: name,
       message: pack?.author ? `by ${pack.author}` : undefined,
       options: [
@@ -263,8 +263,6 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
         {
           label: 'Delete pack',
           destructive: true,
-          // Still an alert, and deliberately: this one is a question, not a
-          // choice between actions.
           onPress: () => Alert.alert(
             'Delete pack?',
             hasStickers ? `"${name}" and its stickers will be removed.` : `"${name}" will be removed.`,

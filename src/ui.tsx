@@ -1,10 +1,9 @@
 import React from 'react';
 import {
-  View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Modal,
+  View, Text, Pressable, StyleSheet, ActivityIndicator, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SymbolView } from 'expo-symbols';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from './theme';
 
 export type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -133,93 +132,6 @@ export function LargeHeader({ title, right }: { title: string; right?: React.Rea
   );
 }
 
-export type SheetOption = {
-  label: string;
-  onPress?: () => void;
-  destructive?: boolean;
-};
-
-/**
- * A bottom sheet, built rather than borrowed.
- *
- * ActionSheetIOS was the obvious choice and it misbehaved here in two ways at
- * once: no Cancel appeared, and a tap outside it went straight through to
- * whatever was underneath — so dismissing the pack menu over a sticker slot
- * opened that slot. Both are things a menu must never do, and neither is fixable
- * from this side of the bridge.
- *
- * So: a Modal, which captures every touch by construction, holding the same
- * shapes iOS uses — a grouped card of actions, destructive in red, and Cancel on
- * its own card below. One sheet exists at a time; asking for another simply
- * replaces it, which means there is no presentation race to serialise and no
- * flag that can get stuck and lock out every later menu.
- *
- * `sheet()` is callable from anywhere; SheetHost renders it, mounted once at the
- * app root.
- */
-export type SheetRequest = { title?: string; message?: string; options: SheetOption[] };
-
-let deliver: ((r: SheetRequest | null) => void) | null = null;
-
-export function sheet(request: SheetRequest) {
-  deliver?.(request);
-}
-
-export function SheetHost() {
-  const insets = useSafeAreaInsets();
-  const [req, setReq] = React.useState<SheetRequest | null>(null);
-  React.useEffect(() => {
-    deliver = setReq;
-    return () => { deliver = null; };
-  }, []);
-
-  const close = () => setReq(null);
-  const pick = (o: SheetOption) => {
-    setReq(null);
-    // After the modal is down, so an action that opens a picker is not fighting
-    // a dismissal.
-    setTimeout(() => o.onPress?.(), 60);
-  };
-
-  return (
-    <Modal visible={!!req} transparent animationType="fade" onRequestClose={close}
-      statusBarTranslucent>
-      <Pressable style={S.sheetDim} onPress={close}>
-        {/* Stops a tap inside the sheet from reaching the dimmer behind it. */}
-        {/* Clear of the home indicator, whatever the device. */}
-        <Pressable style={[S.sheetBody, { paddingBottom: insets.bottom + 8 }]} onPress={() => {}}>
-          <View style={S.sheetCard}>
-            {req?.title || req?.message ? (
-              <View style={S.sheetHead}>
-                {req?.title ? <Text style={S.sheetTitle}>{req.title}</Text> : null}
-                {req?.message ? <Text style={S.sheetMessage}>{req.message}</Text> : null}
-              </View>
-            ) : null}
-            {(req?.options ?? []).map((o, i) => (
-              <React.Fragment key={o.label}>
-                {i > 0 || req?.title || req?.message ? <View style={S.sheetLine} /> : null}
-                <Pressable
-                  onPress={() => pick(o)}
-                  style={({ pressed }) => [S.sheetItem, pressed && { backgroundColor: C.surface2 }]}
-                >
-                  <Text style={[S.sheetItemTxt, o.destructive && { color: C.bad }]}>{o.label}</Text>
-                </Pressable>
-              </React.Fragment>
-            ))}
-          </View>
-
-          <Pressable
-            onPress={close}
-            style={({ pressed }) => [S.sheetCard, S.sheetItem, pressed && { backgroundColor: C.surface2 }]}
-          >
-            <Text style={[S.sheetItemTxt, { fontWeight: '700' }]}>Cancel</Text>
-          </Pressable>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
 // Inset grouped list, the way iOS presents a set of actions on one object:
 // a single rounded card, hairline separators inset to the label, no icons unless
 // they carry meaning.
@@ -260,10 +172,6 @@ export function Row({
 const CORNER = Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : null;
 
 export const EDGE = 20; // one margin for the whole app: headers, grids, footers
-// One height and one radius for every full-width action, wherever it appears. The
-// pinned "Add to WhatsApp" and the sheet's Cancel are the same shape of thing —
-// a full-width button at the bottom of the screen — and looked like two different
-// controls only because they were built in different places.
 export const ACTION_H = 54;
 export const ACTION_R = 14;
 
@@ -316,22 +224,6 @@ export const S = StyleSheet.create({
   rowValue: { color: C.muted, fontSize: 16, maxWidth: '45%' },
   // Inset to the label, not the card edge — the iOS convention.
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: C.line, marginLeft: 16 },
-
-  // The sheet. Sized and spaced to iOS's own: 17pt actions on ~57pt rows, two
-  // grouped cards with the cancel apart, and hairlines between the choices.
-  sheetDim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  // Inset to the app's own margin, so the Cancel lines up with the buttons
-  // pinned at the bottom of the screens behind it.
-  sheetBody: { paddingHorizontal: EDGE, paddingTop: 8, gap: 8 },
-  sheetCard: {
-    backgroundColor: C.surface, borderRadius: ACTION_R, ...CORNER, overflow: 'hidden',
-  },
-  sheetHead: { paddingHorizontal: 16, paddingVertical: 14, alignItems: 'center', gap: 3 },
-  sheetTitle: { color: C.text, fontSize: 15, fontWeight: '700', textAlign: 'center' },
-  sheetMessage: { color: C.muted, fontSize: 13, textAlign: 'center', lineHeight: 18 },
-  sheetLine: { height: StyleSheet.hairlineWidth, backgroundColor: C.line },
-  sheetItem: { minHeight: ACTION_H, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-  sheetItemTxt: { color: C.accent, fontSize: 17, fontWeight: '500', textAlign: 'center' },
 
   h2: { fontSize: 20, fontWeight: '700', color: C.text },
   muted: { color: C.muted, fontWeight: '600' },

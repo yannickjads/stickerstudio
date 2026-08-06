@@ -7,7 +7,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import { C } from '../theme';
-import { Btn, Header, Sym, sheet, S } from '../ui';
+import { Btn, Header, Sym, S } from '../ui';
+import { nativeActionSheet } from '../../modules/native-prompt';
 import type { Nav, MediaSource } from '../nav';
 import type { EditorDocument } from '../types';
 import { DOC_SCHEMA_VERSION, PACK_MAX } from '../types';
@@ -244,7 +245,7 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
   // cropping again — belongs to the sticker screen, which is the one place a
   // sticker is edited whether you just made it or made it last week.
   const clipOptions = () => {
-    sheet({
+    nativeActionSheet({
       title: 'Clip options',
       options: [
         ...(Object.keys(QUALITY) as QualityKey[]).map((k) => ({
@@ -482,7 +483,7 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
       {/* Nothing in the navigation bar saves anything: the only action up here is
           leaving. Centring is a change to the framing, so it sits with the picture. */}
       <Header title={editing ? 'Crop again' : `Crop for ${packName}`} onBack={busy ? undefined : nav.pop} />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
         <Text style={[S.hint, { textAlign: 'center', marginBottom: 10 }]}>
           {busy && progress ? progress
             : editing ? 'drag the frame · pull a corner to resize'

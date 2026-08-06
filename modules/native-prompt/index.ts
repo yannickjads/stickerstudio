@@ -6,14 +6,15 @@ type Native = {
     title: string, message: string | null, placeholders: string[], values: string[],
     confirmText: string, cancelText: string,
   ): Promise<string[] | null>;
+  actionSheet(
+    title: string | null, message: string | null, labels: string[], destructive: number[],
+  ): Promise<number | null>;
 };
 
 const native = requireOptionalNativeModule<Native>('NativePrompt');
 
 export type PromptField = { placeholder: string; value?: string };
 
-// Shows the system's own centred dialog with text fields.
-// Resolves with one value per field, or null if the user cancelled.
 export async function nativePrompt(opts: {
   title: string;
   message?: string;
@@ -30,11 +31,33 @@ export async function nativePrompt(opts: {
       confirmText, cancelText,
     );
   }
-  // Single-field fallback for environments without the native module.
   return new Promise((resolve) => {
     Alert.prompt(title, message, [
       { text: cancelText, style: 'cancel', onPress: () => resolve(null) },
       { text: confirmText, onPress: (v?: string) => resolve([v ?? '']) },
     ], 'plain-text', fields[0]?.value ?? '');
   });
+}
+
+export type ActionSheetOption = {
+  label: string;
+  onPress?: () => void;
+  destructive?: boolean;
+};
+
+export async function nativeActionSheet(opts: {
+  title?: string;
+  message?: string;
+  options: ActionSheetOption[];
+}): Promise<void> {
+  const { title, message, options } = opts;
+  if (!native) return;
+  const labels = options.map((o) => o.label);
+  const destructive = options
+    .map((o, i) => (o.destructive ? i : -1))
+    .filter((i) => i >= 0);
+  const picked = await native.actionSheet(
+    title ?? null, message ?? null, labels, destructive,
+  );
+  if (picked != null) options[picked]?.onPress?.();
 }

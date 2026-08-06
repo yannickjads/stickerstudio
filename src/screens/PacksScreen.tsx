@@ -3,12 +3,12 @@ import { View, Text, StyleSheet, Pressable, ScrollView, Alert, Dimensions, TextI
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { C } from '../theme';
-import { Btn, NavCircle, S, EDGE, sheet, Sym } from '../ui';
+import { Btn, NavCircle, S, EDGE, Sym } from '../ui';
 import type { Nav } from '../nav';
 import type { Pack } from '../types';
 import { PACK_MAX } from '../types';
 import { listPacks, createPack, updatePack, duplicatePack, deletePack } from '../db';
-import { nativePrompt } from '../../modules/native-prompt';
+import { nativePrompt, nativeActionSheet } from '../../modules/native-prompt';
 import { exportAllPacks, importPacksFromZip } from '../backup';
 import { importWastickers, isWastickersFile } from '../wastickers';
 import appConfig from '../../app.json';
@@ -123,7 +123,7 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
     // Version + build shown here so it's always obvious which build is installed.
     const v = appConfig.expo.version;
     const b = (appConfig.expo.ios as { buildNumber?: string }).buildNumber ?? 'dev';
-    sheet({
+    nativeActionSheet({
       title: 'Sticker Studio',
       message: `Version ${v} (${b})`,
       options: [
@@ -141,7 +141,7 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   };
 
   const onMenu = (p: Pack) => {
-    sheet({
+    nativeActionSheet({
       title: p.name,
       options: [
         { label: 'Edit name & author', onPress: () => onEdit(p) },
@@ -197,14 +197,14 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
           <View style={styles.badge}><Sym name="warning" size={32} color={C.bad} /></View>
           <Text style={S.emptyTxt}>Could not load your packs.{'\n'}{loadError}</Text>
           <Btn label="Try again" onPress={() => { setLoading(true); load(); }}
-            style={{ alignSelf: 'stretch', marginHorizontal: 40 }} />
+            style={{ alignSelf: 'stretch', marginHorizontal: EDGE }} />
         </View>
       ) : packs.length === 0 && !loading ? (
         <View style={[S.empty, { flex: 1 }]}>
           <View style={styles.badge}><Sym name="packs" size={32} /></View>
           <Text style={S.emptyTxt}>No packs yet.{'\n'}Create your first sticker pack.</Text>
           <Btn label="New pack" onPress={onNew} disabled={busy}
-            style={{ alignSelf: 'stretch', marginHorizontal: 40 }} />
+            style={{ alignSelf: 'stretch', marginHorizontal: EDGE }} />
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.grid} keyboardShouldPersistTaps="handled">
