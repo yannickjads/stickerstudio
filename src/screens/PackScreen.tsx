@@ -291,30 +291,30 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
         right={<NavCircle icon="more" onPress={packMenu} disabled={busy || waBusy} />} />
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
-        {/* The pack's icon, shown rather than buried in a menu — it is a visible
-            property of the pack, so it belongs where you can see it and tap it.
-            The label underneath says what it is, so nobody has to guess. */}
-        <Pressable style={styles.identity} onPress={iconMenu} disabled={locked}>
-          <View style={styles.iconWrap}>
-            {cover ? (
-              <Image source={{ uri: cover }} style={styles.iconImg} contentFit="cover"
-                cachePolicy="none" transition={140} />
-            ) : (
-              <Sym name="photo" size={22} color={C.muted} />
-            )}
-            <View style={styles.iconEdit}>
-              <Sym name="pencil" size={11} color={C.ink} />
+        <View style={styles.identity}>
+          <Pressable onPress={iconMenu} disabled={locked}
+            style={({ pressed }) => pressed && styles.pressed}>
+            <View style={styles.iconWrap}>
+              {cover ? (
+                <Image source={{ uri: cover }} style={styles.iconImg} contentFit="cover"
+                  cachePolicy="none" transition={140} />
+              ) : (
+                <Sym name="photo" size={26} color={C.muted} />
+              )}
+              <View style={styles.iconEdit}>
+                <Sym name="pencil" size={11} color={C.ink} />
+              </View>
             </View>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.identityLabel}>Pack icon</Text>
-            <Text style={styles.capacityInline}>
-              {stickers.length} of {PACK_MAX}{full ? ' · pack full' : ''}
-              {pack?.author ? ` · by ${pack.author}` : ''}
+          </Pressable>
+          <Pressable onPress={editPack} disabled={locked}
+            style={({ pressed }) => [styles.infoSide, pressed && styles.pressed]}>
+            <Text style={styles.packName} numberOfLines={1}>{name}</Text>
+            {pack?.author ? <Text style={styles.packAuthor} numberOfLines={1}>{pack.author}</Text> : null}
+            <Text style={styles.packCount}>
+              {stickers.length} of {PACK_MAX}{full ? ' · full' : ''}
             </Text>
-          </View>
-          <Sym name="forward" size={14} color={C.muted} />
-        </Pressable>
+          </Pressable>
+        </View>
 
         <View style={styles.grid}>
           {Array.from({ length: PACK_MAX }, (_, i) => {
@@ -362,23 +362,24 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
 const styles = StyleSheet.create({
   scroll: { paddingBottom: 24 },
   identity: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    marginHorizontal: EDGE, marginBottom: 16, padding: 10,
-    backgroundColor: C.surface, borderRadius: 14, borderCurve: 'continuous',
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    marginHorizontal: EDGE, marginBottom: 16,
   },
   iconWrap: {
-    width: 52, height: 52, borderRadius: 12, borderCurve: 'continuous',
-    backgroundColor: C.surface2, alignItems: 'center', justifyContent: 'center',
+    width: 64, height: 64, borderRadius: 16, borderCurve: 'continuous',
+    backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center',
     overflow: 'visible',
   },
-  iconImg: { width: 52, height: 52, borderRadius: 12 },
+  iconImg: { width: 64, height: 64, borderRadius: 16 },
   iconEdit: {
-    position: 'absolute', right: -4, bottom: -4, width: 20, height: 20, borderRadius: 10,
+    position: 'absolute', right: -4, bottom: -4, width: 22, height: 22, borderRadius: 11,
     backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: C.surface,
+    borderWidth: 2, borderColor: C.bg,
   },
-  identityLabel: { color: C.text, fontSize: 16, fontWeight: '600' },
-  capacityInline: { color: C.muted, fontSize: 13, marginTop: 2 },
+  infoSide: { flex: 1, gap: 2 },
+  packName: { color: C.text, fontSize: 18, fontWeight: '700', letterSpacing: -0.2 },
+  packAuthor: { color: C.muted, fontSize: 15 },
+  packCount: { color: C.muted, fontSize: 13, marginTop: 2 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingHorizontal: EDGE },
   // Square tiles — stickers are shown exactly as they'll be used, uncropped by
   // any corner rounding.
