@@ -9,7 +9,7 @@ public class NativePromptModule: Module {
       (title: String, message: String?, placeholders: [String], values: [String],
        confirmText: String, cancelText: String, promise: Promise) in
       DispatchQueue.main.async {
-        guard let presenter = NativePromptModule.topViewController() else {
+        guard let presenter = NativePromptModule.topPresenter() else {
           promise.resolve(nil)
           return
         }
@@ -34,14 +34,14 @@ public class NativePromptModule: Module {
         alert.addAction(UIAlertAction(title: confirmText, style: .default) { _ in
           promise.resolve((alert.textFields ?? []).map { $0.text ?? "" })
         })
-        presenter.present(alert, animated: true)
+        NativePromptModule.safePresent(alert, on: presenter)
       }
     }
 
     AsyncFunction("actionSheet") {
       (title: String?, message: String?, labels: [String], destructive: [Int], promise: Promise) in
       DispatchQueue.main.async {
-        guard let presenter = NativePromptModule.topViewController() else {
+        guard let presenter = NativePromptModule.topPresenter() else {
           promise.resolve(nil)
           return
         }
@@ -52,17 +52,14 @@ public class NativePromptModule: Module {
         )
         for (i, label) in labels.enumerated() {
           let style: UIAlertAction.Style = destructive.contains(i) ? .destructive : .default
-          alert.addAction(UIAlertAction(title: label, style: style) { _ in
-            // UIKit auto-dismisses the sheet but the animation takes ~0.3s.
-            // Resolving immediately lets JS present another controller while
-            // this one is still leaving, which makes UIKit tear both down.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-              promise.resolve(i)
-            }
+          alert.addAction(UIAlertAction(title: label, style: style) { [weak presenter] _ in
+            guard let p = presenter else { promise.resolve(i); return }
+            p.dismiss(animated: true) { promise.resolve(i) }
           })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
-          promise.resolve(nil)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak presenter] _ in
+          guard let p = presenter else { promise.resolve(nil); return }
+          p.dismiss(animated: true) { promise.resolve(nil) }
         })
         if let pop = alert.popoverPresentationController {
           pop.sourceView = presenter.view
@@ -73,17 +70,30 @@ public class NativePromptModule: Module {
           )
           pop.permittedArrowDirections = []
         }
-        presenter.present(alert, animated: true)
+        NativePromptModule.safePresent(alert, on: presenter)
       }
     }
   }
 
-  private static func topViewController() -> UIViewController? {
+  private static func topPresenter() -> UIViewController? {
     let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
     let window = scenes.flatMap { $0.windows }.first { $0.isKeyWindow }
       ?? scenes.first?.windows.first
     var top = window?.rootViewController
-    while let presented = top?.presentedViewController { top = presented }
+    while let presented = top?.presentedViewController {
+      if presented.isBeingDismissed { break }
+      top = presented
+    }
     return top
+  }
+
+  private static func safePresent(_ alert: UIAlertController, on presenter: UIViewController) {
+    if presenter.presentedViewController != nil {
+      presenter.dismiss(animated: false) {
+        presenter.present(alert, animated: true)
+      }
+    } else {
+      presenter.present(alert, animated: true)
+    }
   }
 }
