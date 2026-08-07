@@ -45,6 +45,12 @@ export type ActionSheetOption = {
   destructive?: boolean;
 };
 
+let _setBlocking: ((v: boolean) => void) | null = null;
+
+export function registerBlocker(setter: (v: boolean) => void) {
+  _setBlocking = setter;
+}
+
 export async function nativeActionSheet(opts: {
   title?: string;
   message?: string;
@@ -56,8 +62,14 @@ export async function nativeActionSheet(opts: {
   const destructive = options
     .map((o, i) => (o.destructive ? i : -1))
     .filter((i) => i >= 0);
-  const picked = await native.actionSheet(
-    title ?? null, message ?? null, labels, destructive,
-  );
+  _setBlocking?.(true);
+  let picked: number | null = null;
+  try {
+    picked = await native.actionSheet(
+      title ?? null, message ?? null, labels, destructive,
+    );
+  } finally {
+    _setBlocking?.(false);
+  }
   if (picked != null) options[picked]?.onPress?.();
 }

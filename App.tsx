@@ -9,7 +9,7 @@ import { initStorage } from './src/storage';
 import { importWastickers, isWastickersFile, archiveKind } from './src/wastickers';
 import { importPacksFromZip } from './src/backup';
 import { listPacks, createPack } from './src/db';
-import { nativePrompt, nativeActionSheet } from './modules/native-prompt';
+import { nativePrompt, nativeActionSheet, registerBlocker } from './modules/native-prompt';
 import { PACK_MAX } from './src/types';
 import type { Pack } from './src/types';
 import type { Route, Nav } from './src/nav';
@@ -24,8 +24,11 @@ export default function App() {
   const [stack, setStack] = useState<Route[]>([{ name: 'packs' }]);
   const [ready, setReady] = useState(false);
   const [reload, setReload] = useState(0);
+  const [blocked, setBlocked] = useState(false);
   const handling = useRef(false);
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
+
+  useEffect(() => { registerBlocker(setBlocked); }, []);
 
   useEffect(() => {
     initStorage().then(() => setReady(true)).catch(() => setReady(true));
@@ -129,7 +132,7 @@ export default function App() {
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <StatusBar style="light" />
-        <View style={{ flex: 1, backgroundColor: C.bg }}>
+        <View style={{ flex: 1, backgroundColor: C.bg }} pointerEvents={blocked ? 'none' : 'auto'}>
           {!ready ? (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
               <ActivityIndicator color={C.accent} />
