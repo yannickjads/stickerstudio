@@ -53,7 +53,12 @@ public class NativePromptModule: Module {
         for (i, label) in labels.enumerated() {
           let style: UIAlertAction.Style = destructive.contains(i) ? .destructive : .default
           alert.addAction(UIAlertAction(title: label, style: style) { _ in
-            promise.resolve(i)
+            // UIKit auto-dismisses the sheet but the animation takes ~0.3s.
+            // Resolving immediately lets JS present another controller while
+            // this one is still leaving, which makes UIKit tear both down.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+              promise.resolve(i)
+            }
           })
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
