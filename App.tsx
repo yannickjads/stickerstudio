@@ -10,6 +10,8 @@ import { importWastickers, isWastickersFile, archiveKind } from './src/wasticker
 import { importPacksFromZip } from './src/backup';
 import { listPacks, createPack } from './src/db';
 import { nativePrompt, nativeActionSheet, registerBlocker } from './modules/native-prompt';
+import { TabBar } from './src/ui';
+import type { TabId } from './src/ui';
 import { PACK_MAX } from './src/types';
 import type { Pack } from './src/types';
 import type { Route, Nav } from './src/nav';
@@ -19,9 +21,11 @@ import CropScreen from './src/screens/CropScreen';
 import StickerScreen from './src/screens/StickerScreen';
 import CutoutScreen from './src/screens/CutoutScreen';
 import EditorScreen from './src/screens/EditorScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 
 export default function App() {
   const [stack, setStack] = useState<Route[]>([{ name: 'packs' }]);
+  const [tab, setTab] = useState<TabId>('library');
   const [ready, setReady] = useState(false);
   const [reload, setReload] = useState(0);
   const [blocked, setBlocked] = useState(false);
@@ -46,6 +50,7 @@ export default function App() {
       const packs = await listPacks();
       const goToCrop = (pack: Pack) => {
         resetShareIntent();
+        setTab('library');
         setStack([
           { name: 'packs' },
           { name: 'pack', packId: pack.id, packName: pack.name },
@@ -100,6 +105,7 @@ export default function App() {
         const r = kind === 'stickers'
           ? await importWastickers(url)
           : await importPacksFromZip(url).then((x) => ({ name: `${x.packs} pack(s)`, stickers: x.stickers, skipped: x.skipped, dropped: 0, tray: false }));
+        setTab('library');
         setStack([{ name: 'packs' }]);
         setReload((n) => n + 1);
         Alert.alert('Imported', `${r.name} · ${r.stickers} sticker${r.stickers === 1 ? '' : 's'}`
@@ -127,6 +133,7 @@ export default function App() {
     replace: (r) => setStack((s) => [...s.slice(0, -1), r]),
   };
   const route = stack[stack.length - 1];
+  const showTabBar = tab === 'settings' || (tab === 'library' && stack.length === 1);
 
   return (
     <SafeAreaProvider>
@@ -137,6 +144,8 @@ export default function App() {
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
               <ActivityIndicator color={C.accent} />
             </View>
+          ) : tab === 'settings' ? (
+            <SettingsScreen onImport={() => setReload((n) => n + 1)} />
           ) : route.name === 'packs' ? (
             <PacksScreen key={reload} nav={nav} />
           ) : route.name === 'pack' ? (
@@ -152,6 +161,7 @@ export default function App() {
           ) : (
             <EditorScreen nav={nav} stickerId={route.stickerId} packName={route.packName} />
           )}
+          {showTabBar && <TabBar tab={tab} onTabChange={setTab} />}
         </View>
       </GestureHandlerRootView>
     </SafeAreaProvider>

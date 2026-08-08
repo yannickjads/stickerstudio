@@ -4,6 +4,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SymbolView } from 'expo-symbols';
+import { BlurView } from 'expo-blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 import { C } from './theme';
 
 export type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -33,6 +36,7 @@ const SYMBOLS = {
   pencil: ['pencil', 'pencil'],
   warning: ['exclamationmark.triangle', 'alert-circle-outline'],
   close: ['xmark', 'close'],
+  gear: ['gearshape', 'settings-outline'],
 } as const satisfies Record<string, readonly [string, IconName]>;
 
 export type SymName = keyof typeof SYMBOLS;
@@ -105,13 +109,15 @@ export function NavCircle({ icon, onPress, disabled }: { icon: SymName; onPress:
   );
 }
 
-// Inline navigation header (sub-screens): centered 17pt title, chevron back.
+// Inline navigation header (sub-screens): centered 17pt title, glass back circle.
 export function Header({ title, onBack, right }: { title: string; onBack?: () => void; right?: React.ReactNode }) {
   return (
     <View style={S.header}>
       {onBack ? (
         <Pressable onPress={onBack} hitSlop={10} style={({ pressed }) => [S.headerSide, S.back, pressed && { opacity: 0.55 }]}>
-          <Sym name="back" size={22} />
+          <BlurView intensity={25} tint="dark" style={S.backCircle}>
+            <Sym name="back" size={17} color={C.text} />
+          </BlurView>
         </Pressable>
       ) : (
         <View style={S.headerSide} />
@@ -174,6 +180,39 @@ const CORNER = Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : 
 export const EDGE = 20; // one margin for the whole app: headers, grids, footers
 export const ACTION_H = 54;
 export const ACTION_R = 14;
+export const TAB_BAR_H = 49;
+
+export type TabId = 'library' | 'settings';
+
+export function TabBar({ tab, onTabChange }: { tab: TabId; onTabChange: (t: TabId) => void }) {
+  const insets = useSafeAreaInsets();
+  const go = (t: TabId) => { if (t !== tab) { Haptics.selectionAsync(); onTabChange(t); } };
+  return (
+    <BlurView intensity={60} tint="dark"
+      style={[TB.bar, { paddingBottom: insets.bottom }]}>
+      <Pressable style={TB.tab} onPress={() => go('library')}>
+        <Sym name="packs" size={24} color={tab === 'library' ? C.accent : C.muted} />
+        <Text style={[TB.label, tab === 'library' && TB.active]}>Library</Text>
+      </Pressable>
+      <Pressable style={TB.tab} onPress={() => go('settings')}>
+        <Sym name="gear" size={24} color={tab === 'settings' ? C.accent : C.muted} />
+        <Text style={[TB.label, tab === 'settings' && TB.active]}>Settings</Text>
+      </Pressable>
+    </BlurView>
+  );
+}
+
+const TB = StyleSheet.create({
+  bar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 6, paddingBottom: 2, gap: 3 },
+  label: { color: C.muted, fontSize: 10, fontWeight: '500' },
+  active: { color: C.accent },
+});
 
 export const S = StyleSheet.create({
   header: {
@@ -183,8 +222,12 @@ export const S = StyleSheet.create({
   // Flexible rather than a fixed width: a fixed side clips or wraps any label
   // that happens to be longer than it. The title still centres in what's left.
   headerSide: { minWidth: 44, justifyContent: 'center' },
-  // pull the chevron's ink onto the shared margin (the glyph has side bearing)
-  back: { height: 44, justifyContent: 'center', marginLeft: -8 },
+  back: { height: 44, justifyContent: 'center', marginLeft: -4 },
+  backCircle: {
+    width: 34, height: 34, borderRadius: 17, overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
   headerTitle: {
     flex: 1, textAlign: 'center', color: C.text, fontSize: 17, fontWeight: '600',
     letterSpacing: -0.2, marginHorizontal: 4,

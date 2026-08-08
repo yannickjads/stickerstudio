@@ -3,17 +3,11 @@ import { View, Text, StyleSheet, Pressable, ScrollView, Alert, Dimensions, TextI
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { C } from '../theme';
-import { Btn, NavCircle, S, EDGE, Sym } from '../ui';
+import { Btn, NavCircle, S, EDGE, Sym, TAB_BAR_H } from '../ui';
 import type { Nav } from '../nav';
 import type { Pack } from '../types';
-import { PACK_MAX } from '../types';
 import { listPacks, createPack, updatePack, duplicatePack, deletePack } from '../db';
 import { nativePrompt, nativeActionSheet } from '../../modules/native-prompt';
-import { exportAllPacks, importPacksFromZip } from '../backup';
-import { importWastickers, isWastickersFile } from '../wastickers';
-import appConfig from '../../app.json';
-import * as DocumentPicker from 'expo-document-picker';
-import * as Sharing from 'expo-sharing';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 // Same edge-to-edge rule as the sticker grid: whole-pixel cards, remainder in the gap.
@@ -25,7 +19,6 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
   const insets = useSafeAreaInsets();
   const [packs, setPacks] = useState<Pack[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -78,61 +71,6 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
     load();
   };
 
-  const backUpAll = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const zip = await exportAllPacks();
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(zip, { mimeType: 'application/zip', UTI: 'public.zip-archive' });
-      }
-    } catch (e: any) { Alert.alert('Backup failed', String(e?.message || e)); }
-    finally { setBusy(false); }
-  };
-
-  // Accepts our own .zip backups and .wastickers packs from other sticker apps.
-  const restore = async () => {
-    if (busy) return;
-    const res = await DocumentPicker.getDocumentAsync({
-      type: ['application/zip', 'public.zip-archive', 'com.stickerstudio.wastickers', 'public.data'],
-      copyToCacheDirectory: true,
-    });
-    if (res.canceled || !res.assets?.length) return;
-    const uri = res.assets[0].uri;
-    setBusy(true);
-    try {
-      if (isWastickersFile(uri) || /\.wastickers$/i.test(res.assets[0].name ?? '')) {
-        const r = await importWastickers(uri);
-        await load();
-        Alert.alert('Imported', `${r.name} · ${r.stickers} sticker${r.stickers === 1 ? '' : 's'}`
-          + (r.skipped ? `\n${r.skipped} could not be read.` : ''));
-      } else {
-        const r = await importPacksFromZip(uri);
-        await load();
-        Alert.alert(
-          'Restored',
-          `${r.stickers} sticker${r.stickers === 1 ? '' : 's'} in ${r.packs} pack${r.packs === 1 ? '' : 's'}.`
-          + (r.skipped ? `\n${r.skipped} could not be read.` : ''),
-        );
-      }
-    } catch (e: any) { Alert.alert('Import failed', String(e?.message || e)); }
-    finally { setBusy(false); }
-  };
-
-  const appMenu = () => {
-    // Version + build shown here so it's always obvious which build is installed.
-    const v = appConfig.expo.version;
-    const b = (appConfig.expo.ios as { buildNumber?: string }).buildNumber ?? 'dev';
-    nativeActionSheet({
-      title: 'Sticker Studio',
-      message: `Version ${v} (${b})`,
-      options: [
-        { label: 'Back up all packs (.zip)', onPress: backUpAll },
-        { label: 'Import .wastickers or backup…', onPress: restore },
-      ],
-    });
-  };
-
   // Alert onPress handlers are fire-and-forget: without this a repository error
   // is swallowed and the action just appears to do nothing.
   const run = async (fn: () => Promise<unknown>, failure: string) => {
@@ -166,11 +104,10 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
         <Text style={styles.title} numberOfLines={1}>Packs</Text>
         <View style={styles.actions}>
           {packs.length >= SEARCH_FROM ? (
-            <NavCircle icon={searching ? 'close' : 'search'} disabled={busy}
+            <NavCircle icon={searching ? 'close' : 'search'}
               onPress={() => { setSearching((v) => !v); setQuery(''); }} />
           ) : null}
-          <NavCircle icon="more" onPress={appMenu} disabled={busy} />
-          <NavCircle icon="add" onPress={onNew} disabled={busy} />
+          <NavCircle icon="add" onPress={onNew} />
         </View>
       </View>
 
@@ -203,7 +140,7 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
         <View style={[S.empty, { flex: 1 }]}>
           <View style={styles.badge}><Sym name="packs" size={32} /></View>
           <Text style={S.emptyTxt}>No packs yet.{'\n'}Create your first sticker pack.</Text>
-          <Btn label="New pack" onPress={onNew} disabled={busy}
+          <Btn label="New pack" onPress={onNew}
             style={{ alignSelf: 'stretch', marginHorizontal: EDGE }} />
         </View>
       ) : (
@@ -250,7 +187,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: EDGE, paddingTop: 4, paddingBottom: 12,
   },
-  title: { color: C.text, fontSize: 30, fontWeight: '700', letterSpacing: 0.2, flexShrink: 1 },
+  title: { color: C.text, fontSize: 34, fontWeight: '700', letterSpacing: 0.2, flexShrink: 1 },
   actions: { flexDirection: 'row', gap: 10 },
   searchRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -259,7 +196,7 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, color: C.text, fontSize: 16, padding: 0 },
   noHits: { width: '100%', color: C.muted, fontSize: 15, paddingVertical: 24, textAlign: 'center' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingHorizontal: EDGE, paddingTop: 4, paddingBottom: 30 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingHorizontal: EDGE, paddingTop: 4, paddingBottom: TAB_BAR_H + 50 },
   card: { width: CARD },
   // Square covers, matching the sticker tiles.
   cover: {
