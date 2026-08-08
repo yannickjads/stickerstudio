@@ -115,7 +115,7 @@ export function Header({ title, onBack, right }: { title: string; onBack?: () =>
     <View style={S.header}>
       {onBack ? (
         <Pressable onPress={onBack} hitSlop={10} style={({ pressed }) => [S.headerSide, S.back, pressed && { opacity: 0.55 }]}>
-          <BlurView intensity={25} tint="dark" style={S.backCircle}>
+          <BlurView intensity={100} tint="systemThinMaterial" style={S.backCircle}>
             <Sym name="back" size={17} color={C.text} />
           </BlurView>
         </Pressable>
@@ -188,7 +188,7 @@ export function TabBar({ tab, onTabChange }: { tab: TabId; onTabChange: (t: TabI
   const insets = useSafeAreaInsets();
   const go = (t: TabId) => { if (t !== tab) { Haptics.selectionAsync(); onTabChange(t); } };
   return (
-    <BlurView intensity={80} tint="dark"
+    <BlurView intensity={100} tint="systemChromeMaterial"
       style={[TB.bar, { bottom: Math.max(insets.bottom, 8) }]}>
       <Pressable style={[TB.tab, tab === 'library' && TB.tabActive]} onPress={() => go('library')}>
         <Sym name="packs" size={22} color={tab === 'library' ? C.accent : C.muted} />
@@ -207,8 +207,6 @@ const TB = StyleSheet.create({
     position: 'absolute', left: EDGE, right: EDGE,
     flexDirection: 'row',
     borderRadius: 22, borderCurve: 'continuous', overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
     padding: 5, gap: 5,
   },
   tab: {
@@ -231,9 +229,8 @@ export const S = StyleSheet.create({
   headerSide: { minWidth: 44, justifyContent: 'center' },
   back: { height: 44, justifyContent: 'center', marginLeft: -4 },
   backCircle: {
-    width: 34, height: 34, borderRadius: 17, overflow: 'hidden',
+    width: 36, height: 36, borderRadius: 18, overflow: 'hidden',
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
   },
   headerTitle: {
     flex: 1, textAlign: 'center', color: C.text, fontSize: 17, fontWeight: '600',
