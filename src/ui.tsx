@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SymbolView } from 'expo-symbols';
-import { BlurView } from 'expo-blur';
+import { GlassView, GlassContainer } from 'expo-glass-effect';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { C } from './theme';
@@ -104,9 +104,9 @@ export function NavCircle({ icon, onPress, disabled }: { icon: SymName; onPress:
   return (
     <Pressable onPress={onPress} disabled={disabled} hitSlop={6}
       style={({ pressed }) => [(pressed || disabled) && { opacity: disabled ? 0.35 : 0.6 }]}>
-      <BlurView intensity={100} tint="systemThinMaterial" style={S.navCircle}>
+      <GlassView isInteractive style={S.navCircle}>
         <Sym name={icon} size={19} />
-      </BlurView>
+      </GlassView>
     </Pressable>
   );
 }
@@ -117,9 +117,9 @@ export function Header({ title, onBack, right }: { title: string; onBack?: () =>
     <View style={S.header}>
       {onBack ? (
         <Pressable onPress={onBack} hitSlop={10} style={({ pressed }) => [S.headerSide, S.back, pressed && { opacity: 0.55 }]}>
-          <BlurView intensity={100} tint="systemThinMaterial" style={S.backCircle}>
+          <GlassView isInteractive style={S.backCircle}>
             <Sym name="back" size={17} color={C.text} />
-          </BlurView>
+          </GlassView>
         </Pressable>
       ) : (
         <View style={S.headerSide} />
@@ -191,17 +191,21 @@ export function TabBar({ tab, onTabChange }: { tab: TabId; onTabChange: (t: TabI
   const insets = useSafeAreaInsets();
   const go = (t: TabId) => { if (t !== tab) { Haptics.selectionAsync(); onTabChange(t); } };
   return (
-    <BlurView intensity={100} tint="systemChromeMaterial"
+    <GlassContainer spacing={4}
       style={[TB.bar, { bottom: Math.max(insets.bottom, 8) }]}>
-      <Pressable style={[TB.tab, tab === 'library' && TB.tabActive]} onPress={() => go('library')}>
-        <Sym name="packs" size={22} color={tab === 'library' ? C.accent : C.muted} />
-        <Text style={[TB.label, tab === 'library' && TB.labelActive]}>Library</Text>
+      <Pressable onPress={() => go('library')}>
+        <GlassView isInteractive={tab === 'library'} style={TB.tab}>
+          <Sym name="packs" size={22} color={tab === 'library' ? C.accent : C.muted} />
+          <Text style={[TB.label, tab === 'library' && TB.labelActive]}>Library</Text>
+        </GlassView>
       </Pressable>
-      <Pressable style={[TB.tab, tab === 'settings' && TB.tabActive]} onPress={() => go('settings')}>
-        <Sym name="gear" size={22} color={tab === 'settings' ? C.accent : C.muted} />
-        <Text style={[TB.label, tab === 'settings' && TB.labelActive]}>Settings</Text>
+      <Pressable onPress={() => go('settings')}>
+        <GlassView isInteractive={tab === 'settings'} style={TB.tab}>
+          <Sym name="gear" size={22} color={tab === 'settings' ? C.accent : C.muted} />
+          <Text style={[TB.label, tab === 'settings' && TB.labelActive]}>Settings</Text>
+        </GlassView>
       </Pressable>
-    </BlurView>
+    </GlassContainer>
   );
 }
 
@@ -209,7 +213,7 @@ const TB = StyleSheet.create({
   bar: {
     position: 'absolute', left: EDGE, right: EDGE,
     flexDirection: 'row',
-    borderRadius: 22, borderCurve: 'continuous', overflow: 'hidden',
+    borderRadius: 22, borderCurve: 'continuous',
     padding: 5, gap: 5,
   },
   tab: {
@@ -217,7 +221,6 @@ const TB = StyleSheet.create({
     paddingVertical: 8, gap: 4,
     borderRadius: 17, borderCurve: 'continuous',
   },
-  tabActive: { backgroundColor: 'rgba(255,255,255,0.10)' },
   label: { color: C.muted, fontSize: 10, fontWeight: '600' },
   labelActive: { color: C.accent },
 });
@@ -232,7 +235,7 @@ export const S = StyleSheet.create({
   headerSide: { minWidth: 44, justifyContent: 'center' },
   back: { height: 44, justifyContent: 'center', marginLeft: -4 },
   backCircle: {
-    width: 36, height: 36, borderRadius: 18, overflow: 'hidden',
+    width: 36, height: 36, borderRadius: 18,
     alignItems: 'center', justifyContent: 'center',
   },
   headerTitle: {
@@ -249,7 +252,7 @@ export const S = StyleSheet.create({
   navText: { height: 44, justifyContent: 'center', paddingHorizontal: 4 },
   navTextTxt: { color: C.accent, fontSize: 17, fontWeight: '600', letterSpacing: -0.2 },
   navCircle: {
-    width: 36, height: 36, borderRadius: 18, overflow: 'hidden',
+    width: 36, height: 36, borderRadius: 18,
     alignItems: 'center', justifyContent: 'center',
   },
 
