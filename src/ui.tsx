@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SymbolView } from 'expo-symbols';
-import { GlassView, GlassContainer } from 'expo-glass-effect';
+import { GlassView } from 'expo-glass-effect';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { C } from './theme';
@@ -191,21 +191,16 @@ export function TabBar({ tab, onTabChange }: { tab: TabId; onTabChange: (t: TabI
   const insets = useSafeAreaInsets();
   const go = (t: TabId) => { if (t !== tab) { Haptics.selectionAsync(); onTabChange(t); } };
   return (
-    <GlassContainer spacing={4}
-      style={[TB.bar, { bottom: Math.max(insets.bottom, 8) }]}>
-      <Pressable onPress={() => go('library')}>
-        <GlassView isInteractive={tab === 'library'} style={TB.tab}>
-          <Sym name="packs" size={22} color={tab === 'library' ? C.accent : C.muted} />
-          <Text style={[TB.label, tab === 'library' && TB.labelActive]}>Library</Text>
-        </GlassView>
+    <GlassView style={[TB.bar, { bottom: Math.max(insets.bottom, 8) }]}>
+      <Pressable style={[TB.tab, tab === 'library' && TB.tabActive]} onPress={() => go('library')}>
+        <Sym name="packs" size={22} color={tab === 'library' ? C.accent : C.muted} />
+        <Text style={[TB.label, tab === 'library' && TB.labelActive]}>Library</Text>
       </Pressable>
-      <Pressable onPress={() => go('settings')}>
-        <GlassView isInteractive={tab === 'settings'} style={TB.tab}>
-          <Sym name="gear" size={22} color={tab === 'settings' ? C.accent : C.muted} />
-          <Text style={[TB.label, tab === 'settings' && TB.labelActive]}>Settings</Text>
-        </GlassView>
+      <Pressable style={[TB.tab, tab === 'settings' && TB.tabActive]} onPress={() => go('settings')}>
+        <Sym name="gear" size={22} color={tab === 'settings' ? C.accent : C.muted} />
+        <Text style={[TB.label, tab === 'settings' && TB.labelActive]}>Settings</Text>
       </Pressable>
-    </GlassContainer>
+    </GlassView>
   );
 }
 
@@ -221,6 +216,7 @@ const TB = StyleSheet.create({
     paddingVertical: 8, gap: 4,
     borderRadius: 17, borderCurve: 'continuous',
   },
+  tabActive: { backgroundColor: 'rgba(255,255,255,0.10)' },
   label: { color: C.muted, fontSize: 10, fontWeight: '600' },
   labelActive: { color: C.accent },
 });
