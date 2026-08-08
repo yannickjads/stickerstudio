@@ -7,7 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import { C } from '../theme';
-import { Btn, Header, Sym, S } from '../ui';
+import { Btn, Header, Sym, S, HEADER_H } from '../ui';
 import { nativeActionSheet } from '../../modules/native-prompt';
 import type { Nav, MediaSource } from '../nav';
 import type { EditorDocument } from '../types';
@@ -480,10 +480,7 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
-      {/* Nothing in the navigation bar saves anything: the only action up here is
-          leaving. Centring is a change to the framing, so it sits with the picture. */}
-      <Header title={editing ? 'Crop again' : `Crop for ${packName}`} onBack={busy ? undefined : nav.pop} />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: HEADER_H, paddingBottom: insets.bottom + 20 }}>
         <Text style={[S.hint, { textAlign: 'center', marginBottom: 10 }]}>
           {busy && progress ? progress
             : editing ? 'drag the frame · pull a corner to resize'
@@ -605,6 +602,9 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         </View>
       </ScrollView>
 
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+        <Header title={editing ? 'Crop again' : `Crop for ${packName}`} onBack={busy ? undefined : nav.pop} />
+      </View>
     </View>
   );
 }

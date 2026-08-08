@@ -6,7 +6,7 @@ import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import * as Haptics from 'expo-haptics';
 import { C } from '../theme';
-import { Header, ListGroup, Row, EDGE } from '../ui';
+import { Header, ListGroup, Row, EDGE, HEADER_H } from '../ui';
 import { Checkerboard } from '../editor/checker';
 import type { Nav } from '../nav';
 import type { Asset, Pack, Sticker } from '../types';
@@ -127,9 +127,7 @@ export default function StickerScreen({
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
-      <Header title={packName} onBack={busy ? undefined : nav.pop} />
-
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+      <ScrollView contentContainerStyle={{ paddingTop: HEADER_H, paddingBottom: insets.bottom + 20 }}>
         <View style={st.preview}>
           <Checkerboard size={BOX} />
           {gone ? null : (
@@ -166,6 +164,10 @@ export default function StickerScreen({
           </ListGroup>
         </View>
       </ScrollView>
+
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+        <Header title={packName} onBack={busy ? undefined : nav.pop} />
+      </View>
     </View>
   );
 }

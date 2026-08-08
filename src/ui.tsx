@@ -99,12 +99,14 @@ export function NavText({ label, onPress, disabled }: { label: string; onPress: 
   );
 }
 
-// Circular tinted symbol button (iOS 17 toolbar style) — for "+", "…", etc.
+// Circular glass symbol button — for "+", "…", etc.
 export function NavCircle({ icon, onPress, disabled }: { icon: SymName; onPress: () => void; disabled?: boolean }) {
   return (
     <Pressable onPress={onPress} disabled={disabled} hitSlop={6}
-      style={({ pressed }) => [S.navCircle, (pressed || disabled) && { opacity: disabled ? 0.35 : 0.6 }]}>
-      <Sym name={icon} size={19} />
+      style={({ pressed }) => [(pressed || disabled) && { opacity: disabled ? 0.35 : 0.6 }]}>
+      <BlurView intensity={100} tint="systemThinMaterial" style={S.navCircle}>
+        <Sym name={icon} size={19} />
+      </BlurView>
     </Pressable>
   );
 }
@@ -180,6 +182,7 @@ const CORNER = Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : 
 export const EDGE = 20; // one margin for the whole app: headers, grids, footers
 export const ACTION_H = 54;
 export const ACTION_R = 14;
+export const HEADER_H = 48;
 export const TAB_BAR_H = 64;
 
 export type TabId = 'library' | 'settings';
@@ -246,7 +249,7 @@ export const S = StyleSheet.create({
   navText: { height: 44, justifyContent: 'center', paddingHorizontal: 4 },
   navTextTxt: { color: C.accent, fontSize: 17, fontWeight: '600', letterSpacing: -0.2 },
   navCircle: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: C.tint,
+    width: 36, height: 36, borderRadius: 18, overflow: 'hidden',
     alignItems: 'center', justifyContent: 'center',
   },
 

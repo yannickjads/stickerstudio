@@ -7,7 +7,7 @@ import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { C } from '../theme';
-import { Btn, Header, NavCircle, Sym, S, EDGE } from '../ui';
+import { Btn, Header, NavCircle, Sym, S, EDGE, HEADER_H } from '../ui';
 import type { Nav, MediaSource } from '../nav';
 import type { Pack, Sticker } from '../types';
 import { PACK_MAX } from '../types';
@@ -287,10 +287,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 6 }}>
-      <Header title={name} onBack={locked ? undefined : nav.pop}
-        right={<NavCircle icon="more" onPress={packMenu} disabled={busy || waBusy} />} />
-
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.scroll, { paddingTop: HEADER_H }]}>
         <View style={styles.identity}>
           <Pressable onPress={iconMenu} disabled={locked}
             style={({ pressed }) => pressed && styles.pressed}>
@@ -355,6 +352,10 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
         />
       </View>
 
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+        <Header title={name} onBack={locked ? undefined : nav.pop}
+          right={<NavCircle icon="more" onPress={packMenu} disabled={busy || waBusy} />} />
+      </View>
     </View>
   );
 }
