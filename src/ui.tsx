@@ -180,7 +180,7 @@ const CORNER = Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : 
 export const EDGE = 20; // one margin for the whole app: headers, grids, footers
 export const ACTION_H = 54;
 export const ACTION_R = 14;
-export const TAB_BAR_H = 49;
+export const TAB_BAR_H = 64;
 
 export type TabId = 'library' | 'settings';
 
@@ -188,15 +188,15 @@ export function TabBar({ tab, onTabChange }: { tab: TabId; onTabChange: (t: TabI
   const insets = useSafeAreaInsets();
   const go = (t: TabId) => { if (t !== tab) { Haptics.selectionAsync(); onTabChange(t); } };
   return (
-    <BlurView intensity={60} tint="dark"
-      style={[TB.bar, { paddingBottom: insets.bottom }]}>
-      <Pressable style={TB.tab} onPress={() => go('library')}>
-        <Sym name="packs" size={24} color={tab === 'library' ? C.accent : C.muted} />
-        <Text style={[TB.label, tab === 'library' && TB.active]}>Library</Text>
+    <BlurView intensity={80} tint="dark"
+      style={[TB.bar, { bottom: Math.max(insets.bottom, 8) }]}>
+      <Pressable style={[TB.tab, tab === 'library' && TB.tabActive]} onPress={() => go('library')}>
+        <Sym name="packs" size={22} color={tab === 'library' ? C.accent : C.muted} />
+        <Text style={[TB.label, tab === 'library' && TB.labelActive]}>Library</Text>
       </Pressable>
-      <Pressable style={TB.tab} onPress={() => go('settings')}>
-        <Sym name="gear" size={24} color={tab === 'settings' ? C.accent : C.muted} />
-        <Text style={[TB.label, tab === 'settings' && TB.active]}>Settings</Text>
+      <Pressable style={[TB.tab, tab === 'settings' && TB.tabActive]} onPress={() => go('settings')}>
+        <Sym name="gear" size={22} color={tab === 'settings' ? C.accent : C.muted} />
+        <Text style={[TB.label, tab === 'settings' && TB.labelActive]}>Settings</Text>
       </Pressable>
     </BlurView>
   );
@@ -204,14 +204,21 @@ export function TabBar({ tab, onTabChange }: { tab: TabId; onTabChange: (t: TabI
 
 const TB = StyleSheet.create({
   bar: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
+    position: 'absolute', left: EDGE, right: EDGE,
     flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 22, borderCurve: 'continuous', overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+    padding: 5, gap: 5,
   },
-  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 6, paddingBottom: 2, gap: 3 },
-  label: { color: C.muted, fontSize: 10, fontWeight: '500' },
-  active: { color: C.accent },
+  tab: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 8, gap: 4,
+    borderRadius: 17, borderCurve: 'continuous',
+  },
+  tabActive: { backgroundColor: 'rgba(255,255,255,0.10)' },
+  label: { color: C.muted, fontSize: 10, fontWeight: '600' },
+  labelActive: { color: C.accent },
 });
 
 export const S = StyleSheet.create({
