@@ -602,7 +602,7 @@ export default function CropScreen({ nav, packId, packName, startSlot, editStick
         </View>
       </ScrollView>
 
-      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+      <View style={{ position: 'absolute', top: insets.top + 6, left: 0, right: 0, zIndex: 10 }}>
         <Header title={editing ? 'Crop again' : `Crop for ${packName}`} onBack={busy ? undefined : nav.pop} />
       </View>
     </View>

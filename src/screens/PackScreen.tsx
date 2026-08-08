@@ -352,7 +352,7 @@ export default function PackScreen({ nav, packId, packName }: { nav: Nav; packId
         />
       </View>
 
-      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+      <View style={{ position: 'absolute', top: insets.top + 6, left: 0, right: 0, zIndex: 10 }}>
         <Header title={name} onBack={locked ? undefined : nav.pop}
           right={<NavCircle icon="more" onPress={packMenu} disabled={busy || waBusy} />} />
       </View>

@@ -113,12 +113,12 @@ export default function PacksScreen({ nav }: { nav: Nav }) {
 
       {searching ? (
         <View style={styles.searchRow}>
-          <Sym name="search" size={15} color={C.muted} />
+          <Sym name="search" size={16} color={C.muted} />
           <TextInput
             style={styles.searchInput}
             value={query}
             onChangeText={setQuery}
-            placeholder="Search packs"
+            placeholder="Search"
             placeholderTextColor={C.muted}
             autoFocus
             autoCorrect={false}
@@ -190,11 +190,12 @@ const styles = StyleSheet.create({
   title: { color: C.text, fontSize: 34, fontWeight: '700', letterSpacing: 0.2, flexShrink: 1 },
   actions: { flexDirection: 'row', gap: 10 },
   searchRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginHorizontal: EDGE, marginBottom: 12, paddingHorizontal: 12,
-    height: 38, borderRadius: 10, borderCurve: 'continuous', backgroundColor: C.surface2,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginHorizontal: EDGE, marginBottom: 12, paddingHorizontal: 10,
+    height: 36, borderRadius: 12, borderCurve: 'continuous',
+    backgroundColor: 'rgba(118,118,128,0.12)',
   },
-  searchInput: { flex: 1, color: C.text, fontSize: 16, padding: 0 },
+  searchInput: { flex: 1, color: C.text, fontSize: 17, padding: 0, letterSpacing: -0.2 },
   noHits: { width: '100%', color: C.muted, fontSize: 15, paddingVertical: 24, textAlign: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingHorizontal: EDGE, paddingTop: 4, paddingBottom: TAB_BAR_H + 50 },
   card: { width: CARD },

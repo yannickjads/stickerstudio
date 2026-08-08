@@ -192,11 +192,15 @@ export function TabBar({ tab, onTabChange }: { tab: TabId; onTabChange: (t: TabI
   const go = (t: TabId) => { if (t !== tab) { Haptics.selectionAsync(); onTabChange(t); } };
   return (
     <GlassView style={[TB.bar, { bottom: Math.max(insets.bottom, 8) }]}>
-      <Pressable style={[TB.tab, tab === 'library' && TB.tabActive]} onPress={() => go('library')}>
+      <Pressable
+        style={({ pressed }) => [TB.tab, tab === 'library' && TB.tabActive, pressed && TB.tabPressed]}
+        onPress={() => go('library')}>
         <Sym name="packs" size={22} color={tab === 'library' ? C.accent : C.muted} />
         <Text style={[TB.label, tab === 'library' && TB.labelActive]}>Library</Text>
       </Pressable>
-      <Pressable style={[TB.tab, tab === 'settings' && TB.tabActive]} onPress={() => go('settings')}>
+      <Pressable
+        style={({ pressed }) => [TB.tab, tab === 'settings' && TB.tabActive, pressed && TB.tabPressed]}
+        onPress={() => go('settings')}>
         <Sym name="gear" size={22} color={tab === 'settings' ? C.accent : C.muted} />
         <Text style={[TB.label, tab === 'settings' && TB.labelActive]}>Settings</Text>
       </Pressable>
@@ -208,15 +212,16 @@ const TB = StyleSheet.create({
   bar: {
     position: 'absolute', left: EDGE, right: EDGE,
     flexDirection: 'row',
-    borderRadius: 22, borderCurve: 'continuous',
-    padding: 5, gap: 5,
+    borderRadius: 28, borderCurve: 'continuous',
+    padding: 6, gap: 6,
   },
   tab: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 8, gap: 4,
-    borderRadius: 17, borderCurve: 'continuous',
+    paddingVertical: 10, gap: 4,
+    borderRadius: 22, borderCurve: 'continuous',
   },
-  tabActive: { backgroundColor: 'rgba(255,255,255,0.10)' },
+  tabActive: { backgroundColor: 'rgba(255,255,255,0.12)' },
+  tabPressed: { backgroundColor: 'rgba(255,255,255,0.06)', transform: [{ scale: 0.96 }] },
   label: { color: C.muted, fontSize: 10, fontWeight: '600' },
   labelActive: { color: C.accent },
 });

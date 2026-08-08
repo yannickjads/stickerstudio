@@ -165,7 +165,7 @@ export default function StickerScreen({
         </View>
       </ScrollView>
 
-      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+      <View style={{ position: 'absolute', top: insets.top + 6, left: 0, right: 0, zIndex: 10 }}>
         <Header title={packName} onBack={busy ? undefined : nav.pop} />
       </View>
     </View>
